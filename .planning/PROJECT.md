@@ -58,7 +58,7 @@ Convertir la actividad diaria de un equipo de ventas en métricas confiables y d
 ## Constraints
 
 - **Tech stack**: Next.js + Supabase (alineado con las demás apps de Maze — maze-growth, maze-scheduler) — coherencia y reutilización de conocimiento. *(A confirmar/refinar en research.)*
-- **Integración**: GHL vía API REST / OAuth (cada tenant conecta su propia cuenta GHL; si no tiene, usa carga manual) — Maze ya domina la API de GHL.
+- **Integración**: GHL vía **OAuth 2.0 Marketplace App** (las API keys V1 por location están fuera de soporte desde dic-2025) — cada tenant conecta su propia cuenta GHL vía OAuth; si no tiene, usa carga manual. Refresh tokens cifrados por tenant, rotados de un solo uso. Rate limit compartido por app → cola con throttle global. Webhooks como optimización + reconciliación por pull como fuente de verdad.
 - **Multi-tenancy**: aislamiento por tenant desde el día 1 — es un producto para múltiples clientes.
 - **IA**: modelos Claude (Opus 4.8 / Sonnet) — stack de IA preferido de Maze.
 - **Idioma**: interfaz y copy en español (castellano latino).
@@ -72,6 +72,10 @@ Convertir la actividad diaria de un equipo de ventas en métricas confiables y d
 | Carga manual **y** auto-carga por API coexisten | El sistema debe funcionar sin GHL conectado; el dueño no puede quedar bloqueado si no integra | — Pending |
 | Las 4 capacidades de IA en v1 (auto-carga, coach, alertas, NL) | Decisión explícita de Alejandro — la IA es el diferenciador central del producto | — Pending |
 | Multi-tenant desde el día 1 | Es un producto para múltiples agencias, no una herramienta interna | — Pending |
+| Modelo canónico `metric_facts`: manual y GHL escriben al mismo grano con `source` + `dedupe_key` | Evita el doble conteo (riesgo #1 al coexistir las dos fuentes); un solo contrato del que dependen roll-ups, IA y alertas | — Pending |
+| La IA nunca calcula cifras: solo redacta sobre agregados pre-computados | Previene alucinación de números y fugas cross-tenant (tool use tipado, no SQL crudo) | — Pending |
+| Cargar conteos atómicos y derivar tasas en backend (nunca cargar %) | Es la causa raíz de la varianza 12%↔91% de la planilla; la app ES el contador, no un formulario de fin de día | — Pending |
+| Bucketeo de fechas en timezone del tenant (Ale = UTC-3), no UTC | Un error acá rompe todos los roll-ups | — Pending |
 
 ## Evolution
 
