@@ -1,0 +1,14 @@
+name: Deploy a PRODUCCION
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: mazeos/maze-infra/.github/workflows/deploy.yml@main
+    with:
+      app_dir: /docker/maze-sales-tracker
+      branch: main
+      compose_file: docker-compose.yml
+    secrets: inherit

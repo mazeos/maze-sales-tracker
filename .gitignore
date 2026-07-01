@@ -1,0 +1,9 @@
+# Archivos basura del sistema (macOS)
+.DS_Store
+
+# Dependencias
+node_modules/
+
+# Variables de entorno con secretos (NUNCA se suben)
+.env
+.env.local

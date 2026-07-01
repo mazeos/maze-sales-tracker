@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maze Sales Tracker IA — Maqueta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --onyx:#0B0B0F;
+    --surface:#131319;
+    --surface-2:#1A1A22;
+    --line:#26262F;
+    --ink:#F3F3F0;
+    --muted:#8B8B99;
+    --faint:#5A5A68;
+    --lima:#C5FF49;
+    --lima-dim:#8FB833;
+    --danger:#F2555A;
+    --amber:#F5B14C;
+    --violet:#6C5CE7;
+    --r:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--onyx);
+    color:var(--ink);
+    font-family:'Hanken Grotesk',system-ui,sans-serif;
+    font-size:15px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    position:relative;overflow-x:hidden;
+  }
+  /* cosmos backdrop */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(900px 600px at 88% -8%, rgba(108,92,231,.16), transparent 60%),
+      radial-gradient(700px 500px at 6% 4%, rgba(197,255,73,.06), transparent 55%),
+      radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.5), transparent),
+      radial-gradient(1px 1px at 70% 20%, rgba(255,255,255,.35), transparent),
+      radial-gradient(1px 1px at 45% 60%, rgba(255,255,255,.3), transparent),
+      radial-gradient(1px 1px at 82% 48%, rgba(255,255,255,.4), transparent),
+      radial-gradient(1px 1px at 33% 82%, rgba(255,255,255,.25), transparent),
+      radial-gradient(1px 1px at 92% 74%, rgba(255,255,255,.3), transparent);
+  }
+  .app{position:relative;z-index:1;display:grid;grid-template-columns:74px 1fr;min-height:100vh}
+
+  /* ── rail ── */
+  .rail{
+    border-right:1px solid var(--line);
+    padding:22px 0;display:flex;flex-direction:column;align-items:center;gap:8px;
+    position:sticky;top:0;height:100vh;
+  }
+  .brand{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+    background:radial-gradient(circle at 30% 25%, #1f2415, #0e0e12);
+    border:1px solid #2c3320;margin-bottom:18px;position:relative}
+  .brand svg{width:22px;height:22px}
+  .nav-i{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;
+    color:var(--faint);cursor:pointer;transition:.18s;font-size:18px}
+  .nav-i:hover{color:var(--ink);background:var(--surface)}
+  .nav-i.on{color:var(--onyx);background:var(--lima)}
+  .rail .spacer{flex:1}
+  .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2a2f1a,#454f28);
+    border:1px solid #3a4326;display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--lima)}
+
+  /* ── main ── */
+  .main{padding:26px 34px 60px;max-width:1320px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px;flex-wrap:wrap}
+  .agency{display:flex;align-items:center;gap:13px}
+  .agency h1{font-family:'Fraunces',serif;font-weight:500;font-size:23px;letter-spacing:-.01em}
+  .agency .sub{color:var(--muted);font-size:12.5px;margin-top:1px}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    padding:5px 10px;border-radius:100px;border:1px solid var(--line);color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--lima);box-shadow:0 0 8px var(--lima)}
+  .controls{display:flex;align-items:center;gap:10px}
+  .chip{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);
+    color:var(--ink);padding:9px 14px;border-radius:11px;font-size:13px;font-weight:500;cursor:pointer;transition:.18s}
+  .chip:hover{border-color:#39394a}
+  .chip .k{color:var(--muted);font-size:11.5px}
+  .chip.primary{background:var(--lima);color:var(--onyx);border-color:var(--lima);font-weight:600}
+
+  .eyebrow{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+
+  /* ── hero funnel ── */
+  .hero{background:linear-gradient(180deg, rgba(26,26,34,.7), rgba(19,19,25,.7));
+    border:1px solid var(--line);border-radius:20px;padding:24px 26px 10px;margin-bottom:20px;
+    position:relative;overflow:hidden}
+  .hero::after{content:"";position:absolute;top:-40%;right:-10%;width:420px;height:420px;
+    background:radial-gradient(circle, rgba(197,255,73,.08), transparent 62%);pointer-events:none}
+  .hero-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
+  .hero-head h2{font-family:'Fraunces',serif;font-weight:500;font-size:20px;letter-spacing:-.01em;margin-top:6px}
+  .hero-head .lead{color:var(--muted);font-size:13px;max-width:360px}
+  .hero-kpis{display:flex;gap:26px}
+  .hk .l{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+  .hk .v{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:20px;letter-spacing:-.02em}
+  .hk .v small{font-size:12px;color:var(--muted);font-weight:400}
+
+  .funnel{display:grid;grid-template-columns:repeat(8,1fr);gap:0;align-items:end;
+    height:210px;position:relative;padding-top:8px}
+  .stage{position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+    height:100%;padding:0 5px}
+  .stage .bar{width:100%;max-width:64px;border-radius:8px 8px 0 0;position:relative;
+    background:linear-gradient(180deg, rgba(197,255,73,.55), rgba(197,255,73,.10));
+    border:1px solid rgba(197,255,73,.30);border-bottom:none;transition:.3s}
+  .stage .node{position:absolute;top:-5px;left:50%;transform:translateX(-50%);
+    width:9px;height:9px;border-radius:50%;background:var(--lima);box-shadow:0 0 10px rgba(197,255,73,.8);z-index:3}
+  .stage .cnt{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:17px;margin-top:10px;letter-spacing:-.02em}
+  .stage .lbl{font-size:11px;color:var(--muted);text-align:center;margin-top:2px;line-height:1.25}
+  .stage .lbl.tip{border-bottom:1px dotted var(--faint);cursor:help;padding-bottom:1px}
+  .conv{position:absolute;top:50%;right:-1px;transform:transl(0,-50%);z-index:4;
+    font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;color:var(--muted);
+    background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 5px;white-space:nowrap}
+  .conv.bad{color:var(--danger);border-color:rgba(242,85,90,.4)}
+  .conv.good{color:var(--lima);border-color:rgba(197,255,73,.35)}
+  /* constellation connective line */
+  .constellation{position:absolute;inset:8px 0 0 0;z-index:2;pointer-events:none;overflow:visible}
+
+  /* ── grid row ── */
+  .row{display:grid;grid-template-columns:1.05fr 1.35fr 1.15fr;gap:20px;align-items:stretch}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:19px 20px}
+  .card h3{font-size:13px;font-weight:600;margin-bottom:2px}
+  .card .desc{font-size:12px;color:var(--muted);margin-bottom:16px}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+
+  /* pacing */
+  .pace{margin-bottom:18px}
+  .pace:last-child{margin-bottom:0}
+  .pace-top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+  .pace-top .name{font-size:13px;font-weight:500}
+  .pace-top .val{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700}
+  .pace-top .val span{color:var(--muted);font-weight:400;font-size:12px}
+  .track{height:9px;border-radius:100px;background:var(--surface-2);position:relative;overflow:hidden}
+  .fill{position:absolute;left:0;top:0;bottom:0;border-radius:100px;background:linear-gradient(90deg,var(--lima-dim),var(--lima))}
+  .goalmark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55}
+  .pace-foot{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12px}
+  .tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:100px}
+  .tag.ok{color:var(--lima);background:rgba(197,255,73,.10)}
+  .tag.warn{color:var(--amber);background:rgba(245,177,76,.10)}
+
+  /* rep cards */
+  .reps{display:flex;flex-direction:column;gap:11px}
+  .rep{display:grid;grid-template-columns:38px 1fr auto;gap:13px;align-items:center;
+    padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);transition:.18s}
+  .rep:hover{border-color:#39394a}
+  .rep .rav{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:14px}
+  .rep.set .rav{background:rgba(108,92,231,.16);color:#a99bff}
+  .rep.tri .rav{background:rgba(245,177,76,.14);color:var(--amber)}
+  .rep.clo .rav{background:rgba(197,255,73,.14);color:var(--lima)}
+  .rep .who{font-size:13.5px;font-weight:600}
+  .rep .role{font-size:11px;color:var(--muted)}
+  .rep .kpis{display:flex;gap:18px;text-align:right}
+  .rep .kpi .n{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700}
+  .rep .kpi .t{font-size:10.5px;color:var(--muted)}
+  .rep .kpi .n.warn{color:var(--amber)}
+  .rep .kpi .n.bad{color:var(--danger)}
+
+  /* AI coach */
+  .coach{background:linear-gradient(180deg, rgba(26,30,16,.5), rgba(19,19,25,.6));
+    border:1px solid rgba(197,255,73,.22);border-radius:var(--r);padding:19px 20px;position:relative}
+  .coach .ch{display:flex;align-items:center;gap:9px;margin-bottom:13px}
+  .coach .spark{width:26px;height:26px;border-radius:8px;background:var(--lima);display:grid;place-items:center;flex:none}
+  .coach .spark svg{width:15px;height:15px}
+  .coach .ch .t{font-size:13px;font-weight:600}
+  .coach .ch .s{font-size:11px;color:var(--lima-dim);font-weight:500}
+  .coach p{font-size:13.5px;line-height:1.62;color:#DEDED8;margin-bottom:13px}
+  .coach b{color:var(--ink);font-weight:600}
+  .coach .hl{color:var(--lima);font-weight:600}
+  .coach .rec{background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:10px;padding:11px 13px;
+    font-size:12.5px;display:flex;gap:9px;align-items:flex-start}
+  .coach .rec .arw{color:var(--lima);font-weight:700;flex:none}
+  .coach .foot{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:11px;color:var(--faint)}
+
+  /* mobile capture story */
+  .story{margin-top:44px;display:grid;grid-template-columns:1fr 300px;gap:40px;align-items:center}
+  .story .eyebrow{margin-bottom:12px}
+  .story h2{font-family:'Fraunces',serif;font-weight:500;font-size:30px;line-height:1.12;letter-spacing:-.02em;margin-bottom:14px}
+  .story h2 em{font-style:italic;color:var(--lima)}
+  .story p{color:var(--muted);font-size:14.5px;max-width:440px;margin-bottom:14px}
+  .story ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+  .story li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;color:#CFCFCB}
+  .story li .c{color:var(--lima);font-weight:700;flex:none}
+
+  .phone{width:290px;height:590px;border-radius:40px;background:#050507;border:1px solid #24242e;
+    padding:12px;box-shadow:0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(197,255,73,.06);position:relative;justify-self:end}
+  .phone::before{content:"";position:absolute;top:16px;left:50%;transform:translateX(-50%);width:96px;height:5px;border-radius:100px;background:#24242e}
+  .screen{width:100%;height:100%;border-radius:30px;background:var(--onyx);overflow:hidden;
+    display:flex;flex-direction:column;padding:34px 16px 16px}
+  .ph-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+  .ph-head .r{font-size:12px;color:var(--muted)}
+  .ph-head .r b{color:var(--lima);font-weight:600}
+  .ph-day{font-family:'Fraunces',serif;font-size:17px;margin:8px 0 3px}
+  .ph-sub{font-size:11.5px;color:var(--faint);margin-bottom:16px}
+  .taps{display:flex;flex-direction:column;gap:9px;flex:1}
+  .tap{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
+  .tap .tl{font-size:12.5px;font-weight:500}
+  .tap .tr{display:flex;align-items:center;gap:11px}
+  .tap .num{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:700;min-width:30px;text-align:right}
+  .plus{width:32px;height:32px;border-radius:9px;background:var(--lima);color:var(--onyx);
+    display:grid;place-items:center;font-size:19px;font-weight:700;border:none}
+  .tap.hot{border-color:rgba(197,255,73,.4);box-shadow:0 0 0 3px rgba(197,255,73,.07)}
+  .ph-save{margin-top:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;
+    text-align:center;padding:11px;font-size:12.5px;color:var(--muted)}
+  .ph-save b{color:var(--ink);font-weight:600}
+
+  .footnote{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;color:var(--faint);font-size:12px;flex-wrap:wrap}
+  .footnote .dot2{width:6px;height:6px;border-radius:50%;background:var(--faint)}
+
+  @media(max-width:960px){
+    .row{grid-template-columns:1fr}
+    .story{grid-template-columns:1fr}
+    .phone{justify-self:start;margin-top:10px}
+    .funnel{height:170px}
+    .hk{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- rail -->
+  <nav class="rail">
+    <div class="brand" title="Maze">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/><circle cx="12" cy="10" r="1.4" fill="#C5FF49" stroke="none"/>
+      </svg>
+    </div>
+    <div class="nav-i on" title="Panel">▦</div>
+    <div class="nav-i" title="Equipo">☉</div>
+    <div class="nav-i" title="Ventas">✦</div>
+    <div class="nav-i" title="Metas">◎</div>
+    <div class="nav-i" title="Coach IA">✧</div>
+    <div class="spacer"></div>
+    <div class="nav-i" title="Ajustes">⚙</div>
+    <div class="avatar" title="Alejandro">A</div>
+  </nav>
+
+  <!-- main -->
+  <main class="main">
+
+    <div class="topbar">
+      <div class="agency">
+        <div>
+          <h1>Camino Digital</h1>
+          <div class="sub">Equipo · setter → triage → closer</div>
+        </div>
+        <span class="badge"><span class="dot"></span>Carga manual · en vivo</span>
+      </div>
+      <div class="controls">
+        <div class="chip"><span class="k">Período</span> Semana 26 · 24–30 jun</div>
+        <div class="chip">vs semana anterior ↕</div>
+        <div class="chip primary">Exportar</div>
+      </div>
+    </div>
+
+    <!-- HERO funnel -->
+    <section class="hero">
+      <div class="hero-head">
+        <div>
+          <div class="eyebrow">Embudo de la semana</div>
+          <h2>Dónde entra el volumen y dónde se fuga</h2>
+          <div class="lead">Todo se carga como conteo. Las tasas se calculan solas — nunca a mano.</div>
+        </div>
+        <div class="hero-kpis">
+          <div class="hk"><div class="l">Cash collected</div><div class="v">$42.0k <small>/ $50k</small></div></div>
+          <div class="hk"><div class="l">Cierres</div><div class="v">14 <small>/ 18</small></div></div>
+          <div class="hk"><div class="l">Lead → cierre</div><div class="v">2.7%</div></div>
+        </div>
+      </div>
+
+      <div class="funnel">
+        <div class="stage">
+          <div class="bar" style="height:100%"><div class="node"></div></div>
+          <div class="conv good">68%</div>
+          <div class="cnt">512</div><div class="lbl">Conversaciones</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:68%"><div class="node"></div></div>
+          <div class="conv">61%</div>
+          <div class="cnt">348</div><div class="lbl">Respuestas</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:42%"><div class="node"></div></div>
+          <div class="conv bad">40%</div>
+          <div class="cnt">214</div><div class="lbl tip" title="Links de agenda enviados ÷ respuestas. Definición fija para todo el equipo.">Links enviados</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:26%"><div class="node"></div></div>
+          <div class="conv good">71%</div>
+          <div class="cnt">86</div><div class="lbl tip" title="Llamadas agendadas ÷ links enviados.">Agendados</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:19%"><div class="node"></div></div>
+          <div class="conv">77%</div>
+          <div class="cnt">61</div><div class="lbl">Asistencias</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:15%"><div class="node"></div></div>
+          <div class="conv bad">30%</div>
+          <div class="cnt">47</div><div class="lbl tip" title="Ofertas presentadas ÷ asistencias. Mide el fit del lead.">Ofertas</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:9%"><div class="node"></div></div>
+          <div class="conv good">$3k</div>
+          <div class="cnt">14</div><div class="lbl">Cierres</div>
+        </div>
+        <div class="stage">
+          <div class="bar" style="height:7%;background:linear-gradient(180deg,rgba(197,255,73,.9),rgba(197,255,73,.3));border-color:var(--lima)"><div class="node"></div></div>
+          <div class="cnt" style="color:var(--lima)">$42k</div><div class="lbl">Cash</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROW -->
+    <div class="row">
+
+      <!-- pacing -->
+      <div class="card">
+        <div class="card-head">
+          <div><div class="eyebrow">Ritmo</div><h3 style="margin-top:4px">Metas de la semana</h3></div>
+        </div>
+        <div class="pace">
+          <div class="pace-top"><span class="name">Cierres</span><span class="val">14 <span>/ 18</span></span></div>
+          <div class="track"><div class="fill" style="width:78%"></div><div class="goalmark" style="left:100%"></div></div>
+          <div class="pace-foot"><span class="tag warn">Atrasado 1 día</span><span style="color:var(--muted)">faltan 4 en 1 día</span></div>
+        </div>
+        <div class="pace">
+          <div class="pace-top"><span class="name">Cash collected</span><span class="val">$42k <span>/ $50k</span></span></div>
+          <div class="track"><div class="fill" style="width:84%"></div><div class="goalmark" style="left:100%"></div></div>
+          <div class="pace-foot"><span class="tag ok">En ritmo</span><span style="color:var(--muted)">proyección $49.5k</span></div>
+        </div>
+        <div class="pace">
+          <div class="pace-top"><span class="name">Agendados</span><span class="val">86 <span>/ 80</span></span></div>
+          <div class="track"><div class="fill" style="width:100%"></div><div class="goalmark" style="left:93%"></div></div>
+          <div class="pace-foot"><span class="tag ok">Meta superada</span><span style="color:var(--muted)">+7.5%</span></div>
+        </div>
+      </div>
+
+      <!-- reps -->
+      <div class="card">
+        <div class="card-head">
+          <div><div class="eyebrow">Equipo</div><h3 style="margin-top:4px">Rendimiento por persona</h3></div>
+          <span class="badge" style="border:none;color:var(--faint)">3 activos</span>
+        </div>
+        <div class="reps">
+          <div class="rep set">
+            <div class="rav">F</div>
+            <div><div class="who">Facu</div><div class="role">Setter</div></div>
+            <div class="kpis">
+              <div class="kpi"><div class="n">86</div><div class="t">agendados</div></div>
+              <div class="kpi"><div class="n">40%</div><div class="t">link→agenda</div></div>
+            </div>
+          </div>
+          <div class="rep tri">
+            <div class="rav">V</div>
+            <div><div class="who">Vale</div><div class="role">Triage</div></div>
+            <div class="kpis">
+              <div class="kpi"><div class="n">71%</div><div class="t">asistencia</div></div>
+              <div class="kpi"><div class="n">61</div><div class="t">pases</div></div>
+            </div>
+          </div>
+          <div class="rep clo">
+            <div class="rav">N</div>
+            <div><div class="who">Nico</div><div class="role">Closer</div></div>
+            <div class="kpis">
+              <div class="kpi"><div class="n bad">30%</div><div class="t">cierre</div></div>
+              <div class="kpi"><div class="n warn">83%</div><div class="t">ocupación</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI coach -->
+      <div class="coach">
+        <div class="ch">
+          <div class="spark">
+            <svg viewBox="0 0 24 24" fill="#0B0B0F"><path d="M12 2l2.2 6.3L20.5 9l-5 4 1.6 6.5L12 16.2 6.9 19.5 8.5 13l-5-4 6.3-.7z"/></svg>
+          </div>
+          <div><div class="t">Coach IA</div><div class="s">Lectura de la semana</div></div>
+        </div>
+        <p>El cuello de botella está en el <b>cierre del closer</b>: la tasa cayó de <b>41% a <span class="hl">30%</span></b> (–11 pts) mientras la asistencia se mantuvo. <b>Nico</b> está al <b>83% de ocupación</b> — cerca de saturación.</p>
+        <div class="rec"><span class="arw">→</span><div>Redistribuí 2–3 llamadas de Nico esta semana o revisá la calidad de oferta en sus últimas 5 asistidas. Recuperar 5 pts de cierre = ~2 ventas más.</div></div>
+        <div class="foot">✓ Cada cifra sale de un agregado real — la IA no inventa números</div>
+      </div>
+
+    </div>
+
+    <!-- STORY: mobile capture -->
+    <section class="story">
+      <div>
+        <div class="eyebrow">La captura</div>
+        <h2>La app <em>es</em> el contador.<br>No una planilla de fin de día.</h2>
+        <p>El pecado de la planilla original era la carga: contadores en el celular, números a mano, tasas cargadas a ojo. Acá el setter toca un botón cada vez que pasa algo — y el dato ya queda limpio y atómico.</p>
+        <ul>
+          <li><span class="c">✓</span> Un toque por evento, en vivo, desde el teléfono</li>
+          <li><span class="c">✓</span> Solo conteos — las tasas se derivan solas en el backend</li>
+          <li><span class="c">✓</span> Definición única por métrica: se acabó el “12% un día, 91% otro”</li>
+          <li><span class="c">✓</span> Funciona sin GHL. Cuando lo conectás, se auto-completa.</li>
+        </ul>
+      </div>
+
+      <div class="phone">
+        <div class="screen">
+          <div class="ph-head"><div class="r">Hoy · <b>Facu</b></div><div class="r">14:32</div></div>
+          <div class="ph-day">Martes 30 jun</div>
+          <div class="ph-sub">Tocá para sumar. Se guarda solo.</div>
+          <div class="taps">
+            <div class="tap hot"><div class="tl">Conversación nueva</div><div class="tr"><span class="num">48</span><button class="plus">+</button></div></div>
+            <div class="tap"><div class="tl">Respuesta</div><div class="tr"><span class="num">31</span><button class="plus">+</button></div></div>
+            <div class="tap"><div class="tl">Seguimiento</div><div class="tr"><span class="num">62</span><button class="plus">+</button></div></div>
+            <div class="tap"><div class="tl">Link de agenda</div><div class="tr"><span class="num">19</span><button class="plus">+</button></div></div>
+            <div class="tap"><div class="tl">Agendado</div><div class="tr"><span class="num">7</span><button class="plus">+</button></div></div>
+          </div>
+          <div class="ph-save"><b>Sincronizado</b> · tasa link→agenda <b style="color:var(--lima)">37%</b> hoy</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footnote">
+      <span>Maqueta · Maze Sales Tracker IA</span>
+      <span class="dot2"></span>
+      <span>Fase 1–5 · datos de ejemplo</span>
+      <span class="dot2"></span>
+      <span>Branding Maze — Fraunces + Hanken · lima #C5FF49 sobre onyx</span>
+    </div>
+
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+name: Deploy a PRUEBAS
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy:
+    uses: mazeos/maze-infra/.github/workflows/deploy.yml@main
+    with:
+      app_dir: /docker/maze-sales-tracker-dev
+      branch: develop
+      compose_file: docker-compose.dev.yml
+    secrets: inherit
