@@ -54,6 +54,7 @@ Convertir la actividad diaria de un equipo de ventas en métricas confiables y d
 - **Audiencia:** clientes de mentoring de Maze Funnels — emprendedores con equipos de ventas de appointment-setting / high-ticket.
 - **Ecosistema Maze:** ya hay GHL conectado (MCP propio, location `siM5ZYQ90OgKoshnqLeC`), Slack como canal de soporte, n8n como puente de automatización. Maze ya se posiciona abiertamente como marca sobre GHL.
 - **Modelo de datos conocido:** el embudo de dos/tres etapas (setter → triage → closer) y todas las métricas ya están mapeadas en el análisis previo.
+- **Fuente de verdad de paridad (requisito duro):** la app debe **reemplazar y hacer EXACTAMENTE lo mismo** que la planilla, más las mejoras. El template CAMINO DIGITAL es la referencia canónica del modelo de datos y de cada métrica/pestaña/roll-up: `https://docs.google.com/spreadsheets/d/1VNf3gX1A2D623fnIm5vwkLJZf9cMvpgzJM0wpYyhjAI/`. Paridad total = criterio de aceptación de v1 (fases 2-3): cada métrica y cada tabla de la planilla debe existir 1:1 en la app antes de sumar mejoras.
 
 ## Constraints
 
