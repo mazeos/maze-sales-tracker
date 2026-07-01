@@ -245,6 +245,16 @@
   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
 
+  /* ---------- Configuraciones (miembros editables) ---------- */
+  .cfg-member{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .cfg-line1{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .cfg-line1 .cfg-name{flex:1;min-width:150px}
+  .cfg-line1 .cfg-role{width:auto}
+  .cfg-spacer{flex:1}
+  .cfg-line2{display:flex;gap:8px;align-items:center;margin-top:11px;padding-top:11px;border-top:1px solid var(--line);font-size:13px;color:var(--muted);flex-wrap:wrap}
+  .cfg-line2 input{width:72px}
+  .cfg-line2 b{color:var(--lime-ink);font-family:'JetBrains Mono';font-weight:700}
+
   /* ---------- Desglose (drill-down) ---------- */
   .clik{cursor:pointer;transition:.14s;border-radius:5px}
   .clik:hover{color:var(--lime-ink)}
@@ -299,7 +309,7 @@
     <div class="nav-i" data-view="dashboard" title="Panel">▦<span class="tt">Panel</span></div>
     <div class="nav-i" data-view="capture" title="Cargar">＋<span class="tt">Cargar día</span></div>
     <div class="nav-i" data-view="table" title="Tabla">▤<span class="tt">Tabla (día por día)</span></div>
-    <div class="nav-i" data-view="team" title="Equipo">☉<span class="tt">Equipo</span></div>
+    <div class="nav-i" data-view="team" title="Configuraciones">⚙<span class="tt">Configuraciones</span></div>
     <div class="nav-i" data-view="goals" title="Metas">◎<span class="tt">Metas</span></div>
     <div class="nav-i" data-view="sales" title="Ventas">✦<span class="tt">Ventas</span></div>
     <div class="spacer"></div>
@@ -364,7 +374,8 @@ const MONTHS=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov',
 const KEY = 'maze_sales_tracker_v1';
 let DB = null;
 
-function todayStr(){ return dstr(new Date()); }
+const TZS=[['America/Argentina/Buenos_Aires','Buenos Aires (UTC-3)'],['America/Bogota','Bogotá / Lima (UTC-5)'],['America/Mexico_City','Ciudad de México (UTC-6)'],['America/Caracas','Caracas (UTC-4)'],['America/Santiago','Santiago (UTC-4)'],['America/New_York','Miami / Nueva York (UTC-5)'],['Europe/Madrid','Madrid (UTC+1)']];
+function todayStr(){ const tz=(DB&&DB.team&&DB.team.tz)||'America/Argentina/Buenos_Aires'; try{ return new Intl.DateTimeFormat('en-CA',{timeZone:tz}).format(new Date()); }catch(e){ return dstr(new Date()); } }
 function dstr(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function parseD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function uid(){ return 'm'+Math.random().toString(36).slice(2,8); }
@@ -381,7 +392,7 @@ function seed(){
   const members = [
     {id:'m_facu', name:'Facu', role:'setter'},
     {id:'m_vale', name:'Vale', role:'triage'},
-    {id:'m_nico', name:'Nico', role:'closer'},
+    {id:'m_nico', name:'Nico', role:'closer', commission:10},
   ];
   const entries = {};
   const R = (a,b)=> a + Math.floor(Math.random()*(b-a+1));
@@ -407,7 +418,7 @@ function seed(){
   const sales = [
     {id:uid(), date:todayStr(), cliente:'Facundo Guerra', programa:'High Ticket', metodo:'Transferencia', facturado:4000, cash:2000, cuotas:2, reserva:0, closer:'m_nico', triage:'m_vale', setter:'m_facu', fuente:'Instagram'},
   ];
-  return { team:{name:'Camino Digital', mode:'full'}, members, entries, goals, sales };
+  return { team:{name:'Camino Digital', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
 }
 
 // ---------- Períodos ----------
@@ -732,6 +743,7 @@ function buildDrill(spec){
     if(!spec.memberId && spec.num.roles.join()===spec.den.roles.join()) body+=rateMemberTable(A,B);
     body+=dayTableRate(A.byDay,B.byDay);
   }
+  if(spec.memberId){ const m=DB.members.find(x=>x.id===spec.memberId); if(m && m.role==='closer' && m.commission){ const s=sumMember(m.id,P.start,P.end); const cash=s.cash_nuevo||0; const pay=Math.round(m.commission/100*cash); body+=`<div class="dsec"><div class="dh">A cobrar (comisión ${m.commission}%)</div><div class="formula"><span class="ftok"><b>${money(cash)}</b>cash</span><span class="fop">×</span><span class="ftok"><b>${m.commission}%</b></span><span class="fop">=</span><span class="ftok tot"><b>${money(pay)}</b></span></div></div>`; } }
   return `<div class="drill-head"><div><div class="eyebrow">${esc(P.label)}</div><h3>${esc(spec.label)}</h3></div><div class="drill-val">${headline}</div></div><p class="drill-def">${esc(spec.def||'')}</p>${body}`;
 }
 function openDrill(spec){
@@ -908,36 +920,58 @@ window.tblEdit=(el)=>{
 };
 
 // ---------- Equipo ----------
+function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=sumMember(m.id, r.start, r.end); return Math.round((m.commission||0)/100 * (s.cash_nuevo||0)); }
 function renderTeam(){
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
     .map(([v,l])=>`<option value="${v}" ${DB.team.mode===v?'selected':''}>${l}</option>`).join('');
+  const tz=(DB.team.tz)||'America/Argentina/Buenos_Aires';
+  const tzOpts=TZS.map(([v,l])=>`<option value="${v}" ${tz===v?'selected':''}>${l}</option>`).join('');
+  const roleOpts=(sel)=>['setter','triage','closer'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
   let list='';
   DB.members.forEach(m=>{
-    list+=`<div class="li"><div style="display:flex;align-items:center;gap:12px">
-      <span class="pill ${m.role}">${ROLE_LABEL[m.role]}</span><div class="who">${esc(m.name)}</div></div>
-      <button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button></div>`;
+    const line2 = m.role==='closer'
+      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)">% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
+      : '';
+    list+=`<div class="cfg-member">
+      <div class="cfg-line1">
+        <input class="inp cfg-name" value="${esc(m.name)}" onchange="setMemberName('${m.id}',this.value)" data-tip="Nombre de la persona. Se actualiza en todo el panel.">
+        <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga.">${roleOpts(m.role)}</select>
+        <span class="cfg-spacer"></span>
+        <button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>
+        <button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>
+      </div>${line2}
+    </div>`;
   });
   if(!DB.members.length) list=`<div class="empty">Sin miembros todavía.</div>`;
-  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Equipo</div><h2 class="view">Miembros y configuración</h2>
-    <div class="grid2">
-      <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)"></div>
-      <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)">${modeOpts}</select></div>
+  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
+    <div class="section"><div class="eyebrow">Agencia</div>
+      <div class="grid2">
+        <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)"></div>
+        <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)">${modeOpts}</select></div>
+        <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)">${tzOpts}</select></div>
+      </div>
     </div>
+    <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     <div class="section"><div class="eyebrow">Agregar miembro</div>
       <div class="grid2">
         <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
         <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
-    </div>
-    <div class="section"><div class="eyebrow">Equipo actual</div><div class="list">${list}</div></div>` + footer();
+    </div>` + footer();
 }
 window.setAgName=(v)=>{ DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ DB.team.mode=v; save(); };
+window.setTz=(v)=>{ DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
+window.setMemberName=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
+window.setMemberRole=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+window.setCommission=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
+window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
 window.addMember=()=>{
   const name=(document.getElementById('newName').value||'').trim(); const role=document.getElementById('newRole').value;
   if(!name){ toast('Poné un nombre'); return; }
-  DB.members.push({id:uid(), name, role}); save(); toast(name+' agregado'); renderTeam();
+  const m={id:uid(), name, role}; if(role==='closer') m.commission=0;
+  DB.members.push(m); save(); toast(name+' agregado'); renderTeam();
 };
 window.delMember=(id)=>{ if(!confirm('¿Quitar del equipo? Sus datos quedan guardados pero no se muestran.')) return; DB.members=DB.members.filter(m=>m.id!==id); save(); renderTeam(); };
 
