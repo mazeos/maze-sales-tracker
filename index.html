@@ -192,6 +192,44 @@
   .footnote .dot2{width:6px;height:6px;border-radius:50%;background:var(--faint)}
   .footnote a{color:var(--muted);border-bottom:1px dotted var(--faint)}
 
+  /* tooltips */
+  [data-tip]{position:relative}
+  [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 9px);left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:400;line-height:1.45;padding:8px 11px;border-radius:9px;width:max-content;max-width:250px;white-space:normal;text-align:left;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.55)}
+  [data-tip]:hover::before{content:"";position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--surface-2);z-index:60}
+  .info{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--faint);color:var(--faint);font-size:9.5px;font-weight:700;cursor:help;margin-left:6px;vertical-align:middle;font-style:normal}
+  .info:hover{color:var(--lima);border-color:var(--lima-dim)}
+
+  /* capture status + done */
+  .cap-intro{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:16px}
+  .cap-intro .ico{width:30px;height:30px;border-radius:9px;background:rgba(197,255,73,.12);color:var(--lima);display:grid;place-items:center;flex:none;font-size:16px}
+  .cap-intro p{font-size:13px;color:var(--muted);line-height:1.5}
+  .cap-intro b{color:var(--ink)}
+  .savepill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--lima-dim);background:rgba(197,255,73,.08);border:1px solid rgba(197,255,73,.2);padding:6px 11px;border-radius:100px;transition:.2s}
+  .savepill.flash{color:var(--onyx);background:var(--lima);border-color:var(--lima)}
+  .cap-done{margin-top:16px;display:flex;justify-content:flex-end}
+
+  /* vista tabla (Google Sheets / Airtable) */
+  .sheet{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+  table.grid{border-collapse:separate;border-spacing:0;font-size:12.5px;width:auto}
+  table.grid th,table.grid td{border-bottom:1px solid #1e1e26;border-right:1px solid #1e1e26;text-align:center;white-space:nowrap}
+  .grid thead th{position:sticky;top:0;background:var(--surface-2);z-index:2;color:var(--muted);font-weight:600;font-size:11px;padding:5px 7px;min-width:42px;height:40px}
+  .grid thead th.today{background:rgba(197,255,73,.14);color:var(--lima)}
+  .grid .dow{font-size:9px;color:var(--faint);font-weight:400;margin-top:1px}
+  .grid .stickyc{position:sticky;left:0;background:var(--surface-2);z-index:3;text-align:left;padding:8px 13px;min-width:158px;max-width:158px;font-family:'Hanken Grotesk';font-weight:600;font-size:12px;border-right:1px solid var(--line)}
+  .grid thead .stickyc{z-index:4}
+  .grid td.tot{position:sticky;right:0;background:var(--surface-2);font-family:'JetBrains Mono';font-weight:700;min-width:66px;z-index:1;padding:7px 9px;color:var(--lima)}
+  .grid thead th.tot{z-index:3;color:var(--muted)}
+  .grid input.cell{width:44px;height:34px;background:transparent;border:none;color:var(--ink);text-align:center;font-family:'JetBrains Mono';font-size:12.5px;padding:0;-moz-appearance:textfield}
+  .grid input.cell::-webkit-outer-spin-button,.grid input.cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .grid input.cell:focus{outline:2px solid var(--lima);outline-offset:-2px;background:rgba(197,255,73,.08)}
+  .grid input.cell:hover{background:rgba(255,255,255,.03)}
+  .grid td.today{background:rgba(197,255,73,.04)}
+  .grid tr.drow td{background:rgba(255,255,255,.02);font-family:'JetBrains Mono';color:var(--muted);padding:7px 6px}
+  .grid tr.drow .stickyc{color:var(--ink);background:#171720}
+  .grid tr.drow td.tot{background:#171720}
+  .grid .lbl{cursor:help}
+  .grid .lbl:hover{color:var(--lima)}
+
   @media(max-width:960px){
     .app{grid-template-columns:60px 1fr}
     .main{padding:18px 16px 60px}
@@ -210,6 +248,7 @@
     </div>
     <div class="nav-i" data-view="dashboard" title="Panel">▦<span class="tt">Panel</span></div>
     <div class="nav-i" data-view="capture" title="Cargar">＋<span class="tt">Cargar día</span></div>
+    <div class="nav-i" data-view="table" title="Tabla">▤<span class="tt">Tabla (día por día)</span></div>
     <div class="nav-i" data-view="team" title="Equipo">☉<span class="tt">Equipo</span></div>
     <div class="nav-i" data-view="goals" title="Metas">◎<span class="tt">Metas</span></div>
     <div class="nav-i" data-view="sales" title="Ventas">✦<span class="tt">Ventas</span></div>
@@ -410,6 +449,7 @@ function render(){
   setNav();
   if(state.view==='dashboard') renderDashboard();
   else if(state.view==='capture') renderCapture();
+  else if(state.view==='table') renderTable();
   else if(state.view==='team') renderTeam();
   else if(state.view==='goals') renderGoals();
   else if(state.view==='sales') renderSales();
@@ -465,7 +505,7 @@ function renderDashboard(){
   const hero=`<section class="hero">
     <div class="hero-head">
       <div><div class="eyebrow">Embudo del período</div>
-        <h2>Dónde entra el volumen y dónde se fuga</h2>
+        <h2>Dónde entra el volumen y dónde se fuga ${info('El embudo del equipo: cada etapa muestra el total y el % que pasa a la siguiente. En rojo, las fugas (conversión baja); en lima, lo sano.')}</h2>
         <div class="lead">Todo se carga como conteo. Las tasas se calculan solas — nunca a mano.</div></div>
       <div class="hero-kpis">
         ${hk('Cash collected', money(f.cash), goalStr('cash_nuevo'))}
@@ -504,7 +544,7 @@ function pacingCard(){
     </div>`;
   });
   if(!rows) rows=`<div class="empty">Sin metas cargadas. Definilas en <b>Metas</b>.</div>`;
-  return `<div class="card"><div class="card-head"><div><div class="eyebrow">Ritmo</div><h3 style="margin-top:4px">Metas de la semana</h3></div></div>${rows}</div>`;
+  return `<div class="card"><div class="card-head"><div><div class="eyebrow">Ritmo</div><h3 style="margin-top:4px">Metas de la semana ${info('Compara lo real contra tu meta y calcula el ritmo: te dice si vas adelantado o atrasado según cuántos días de la semana ya pasaron.')}</h3></div></div>${rows}</div>`;
 }
 function weekElapsedFrac(cw){
   const t=todayStr(); if(t<cw.start) return 1; if(t>cw.end) return 1;
@@ -530,7 +570,7 @@ function repsCard(r){
       <div class="kpis">${kpis}</div></div>`;
   });
   if(!DB.members.length) rows=`<div class="empty">Sin miembros. Agregalos en <b>Equipo</b>.</div>`;
-  return `<div class="card"><div class="card-head"><div><div class="eyebrow">Equipo</div><h3 style="margin-top:4px">Rendimiento por persona</h3></div><span class="badge" style="border:none;color:var(--faint)">${DB.members.length} activos</span></div><div class="reps">${rows}</div></div>`;
+  return `<div class="card"><div class="card-head"><div><div class="eyebrow">Equipo</div><h3 style="margin-top:4px">Rendimiento por persona ${info('Los 2 KPIs clave de cada rol. En ámbar/rojo cuando hay que prestar atención (ej: closer >80% de ocupación, cierre <30%).')}</h3></div><span class="badge" style="border:none;color:var(--faint)">${DB.members.length} activos</span></div><div class="reps">${rows}</div></div>`;
 }
 function kpi(n,t,cls){ return `<div class="kpi"><div class="n ${cls||''}">${n}</div><div class="t">${t}</div></div>`; }
 
@@ -565,7 +605,7 @@ function rollupSection(){
     const ag=f.stages.find(s=>s.key==='agendados').v;
     trs+=`<tr><td>${label}</td><td>${num(f.conversaciones)}</td><td>${num(ag)}</td><td>${num(f.cierres)}</td><td>${money(f.cash)}</td></tr>`;
   });
-  return `<div class="section"><div class="eyebrow">Resumen automático · todos los roles (incluido setter)</div>
+  return `<div class="section"><div class="eyebrow">Resumen automático · todos los roles (incluido setter) ${info('Los mismos números sumados por período: hoy, esta semana, este mes, trimestre y año. Se calcula solo — esto en la planilla no estaba automatizado para setters.')}</div>
     <div class="rollup"><table>
       <thead><tr><th>Período</th><th>Conversaciones</th><th>Agendados</th><th>Cierres</th><th>Cash</th></tr></thead>
       <tbody>${trs}</tbody></table></div></div>`;
@@ -595,16 +635,22 @@ function renderCapture(){
     });
     const isToday = state.capDate===todayStr();
     body=`<div class="cap-wrap">
+      <div class="cap-intro">
+        <div class="ico">☝</div>
+        <p>Tocá <b>+</b> cada vez que pasa algo (una conversación nueva, una respuesta, un link enviado…). <b>No hay botón de guardar</b>: cada toque se guarda solo al instante. Cargá solo lo que uses; el resto dejalo en 0.</p>
+      </div>
       <div class="cap-controls">
-        <select class="chip" onchange="setCapMember(this.value)">${memberOpts}</select>
-        <input class="chip inp" style="width:auto" type="date" value="${state.capDate}" max="${todayStr()}" onchange="setCapDate(this.value)">
+        <select class="chip" onchange="setCapMember(this.value)" data-tip="De quién estás cargando el día.">${memberOpts}</select>
+        <input class="chip inp" style="width:auto" type="date" value="${state.capDate}" max="${todayStr()}" onchange="setCapDate(this.value)" data-tip="Podés cargar o corregir cualquier día pasado.">
         <span class="chip"><span class="k">Rol</span> ${ROLE_LABEL[member.role]}</span>
+        <span class="savepill" id="savePill">✓ Guardado</span>
       </div>
       <div class="taps">${taps}</div>
-      <div class="cap-save"><span>Se guarda solo, al toque. ${isToday?'<b style="color:var(--lima)">Hoy</b>':''}</span><span id="capSum">${captureSummary(member,key)}</span></div>
+      <div class="cap-save"><span>${isToday?'<b style="color:var(--lima)">Hoy</b> · ':''}cada celda se guarda sola</span><span id="capSum">${captureSummary(member,key)}</span></div>
+      <div class="cap-done"><button class="btn" onclick="go('dashboard')">Listo · ver el panel →</button></div>
     </div>`;
   }
-  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Carga manual</div><h2 class="view">La app <em style="font-family:Fraunces;font-style:italic;color:var(--lima)">es</em> el contador</h2>` + body + footer();
+  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Carga manual</div><h2 class="view">La app <em style="font-family:Fraunces;font-style:italic;color:var(--lima)">es</em> el contador ${info('Reemplaza al contador manual del celular: un toque por evento. La cifra queda limpia y atómica, y las tasas se derivan solas.')}</h2>` + body + footer();
 }
 function captureSummary(member,key){
   const cur=DB.entries[key]||{};
@@ -614,6 +660,7 @@ function captureSummary(member,key){
 }
 window.setCapMember=(id)=>{ state.capMember=id; renderCapture(); };
 window.setCapDate=(d)=>{ state.capDate=d||todayStr(); renderCapture(); };
+function flashSave(){ const p=document.getElementById('savePill'); if(!p) return; p.textContent='✓ Guardado'; p.classList.add('flash'); clearTimeout(flashSave._t); flashSave._t=setTimeout(()=>{p.classList.remove('flash');},700); }
 window.bump=(k,dir)=>{
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
@@ -622,11 +669,94 @@ window.bump=(k,dir)=>{
   const el=document.getElementById('n_'+k); if(el) el.textContent=v;
   const member=DB.members.find(m=>m.id===state.capMember);
   const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
+  flashSave();
 };
 window.setMoney=(k,val)=>{
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
-  DB.entries[key][k]=Math.max(0,+val||0); save(); toast('Guardado');
+  DB.entries[key][k]=Math.max(0,+val||0); save(); flashSave();
+};
+
+// ---------- Tabla (día por día, estilo Google Sheets / Airtable) ----------
+function renderTable(){
+  if(!state.tblMember || !DB.members.find(m=>m.id===state.tblMember)) state.tblMember = DB.members[0]?DB.members[0].id:null;
+  if(!state.tblRef) state.tblRef = todayStr();
+  const member = DB.members.find(m=>m.id===state.tblMember);
+  let body='';
+  if(!member){ body=`<div class="empty">No hay miembros. Andá a <b>Equipo</b> y agregá al menos uno.</div>`; }
+  else {
+    const ref=parseD(state.tblRef); const y=ref.getFullYear(), mo=ref.getMonth();
+    const days=new Date(y,mo+1,0).getDate();
+    const dayList=[]; for(let d=1;d<=days;d++) dayList.push(dstr(new Date(y,mo,d)));
+    const T=todayStr();
+    // cabecera
+    let head='<tr><th class="stickyc">Métrica</th>';
+    dayList.forEach(ds=>{ const dd=parseD(ds); const isT=ds===T;
+      head+=`<th class="${isT?'today':''}">${dd.getDate()}<div class="dow">${['do','lu','ma','mi','ju','vi','sá'][dd.getDay()]}</div></th>`; });
+    head+='<th class="tot">Total</th></tr>';
+    // filas de métricas (editables)
+    let rows='';
+    METRICS[member.role].forEach(mt=>{
+      let tot=0, cells='';
+      dayList.forEach(ds=>{ const key=state.tblMember+'|'+ds; const v=(DB.entries[key]&&+DB.entries[key][mt.k])||0; tot+=v; const isT=ds===T;
+        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)"></td>`; });
+      rows+=`<tr><td class="stickyc lbl" data-tip="${esc(mt.def)}">${mt.label}</td>${cells}<td class="tot">${mt.money?money(tot):tot}</td></tr>`;
+    });
+    // filas derivadas (tasas, read-only)
+    rows+=derivedRows(member.role, dayList);
+    const memberOpts=DB.members.map(m=>`<option value="${m.id}" ${state.tblMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
+    body=`<div class="cap-controls">
+      <select class="chip" onchange="setTblMember(this.value)" data-tip="De quién ves el mes.">${memberOpts}</select>
+      <button class="chip icon" onclick="tblNav(-1)">‹</button>
+      <span class="chip">${MONTHS[mo]} ${y}</span>
+      <button class="chip icon" onclick="tblNav(1)">›</button>
+      <span class="badge" data-tip="Igual que en Google Sheets: hacé clic en una celda y escribí. Se guarda solo.">✎ Editá cualquier celda</span>
+    </div>
+    <div class="sheet"><table class="grid"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+  }
+  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Vista tabla</div><h2 class="view">Día por día ${info('El mismo formato del Google Sheet original: cada columna es un día del mes, cada fila una métrica. Las filas grises son tasas calculadas (no se editan).')}</h2>` + body + footer();
+}
+function derivedRows(role, dayList){
+  const get=(ds,k)=>{ const key=state.tblMember+'|'+ds; return (DB.entries[key]&&+DB.entries[key][k])||0; };
+  const defs={
+    setter:[
+      {label:'Conversaciones nuevas', def:'Outbound + todos los inbound.', num:ds=>get(ds,'outbound')+get(ds,'inbound_ig')+get(ds,'inbound_wpp_tk')+get(ds,'inbound_wpp_ig')},
+      {label:'Total links', def:'Links de agenda IG + Wpp.', num:ds=>get(ds,'links_ig')+get(ds,'links_wpp')},
+      {label:'Total agendados', def:'Agendados IG + Wpp.', num:ds=>get(ds,'agend_ig')+get(ds,'agend_wpp')},
+      {label:'Tasa link→agenda', def:'Agendados ÷ links enviados.', pct:ds=>[get(ds,'agend_ig')+get(ds,'agend_wpp'), get(ds,'links_ig')+get(ds,'links_wpp')]},
+    ],
+    triage:[
+      {label:'% Asistencia', def:'Asistencias ÷ agendadas.', pct:ds=>[get(ds,'asistencias'),get(ds,'agendadas')]},
+      {label:'% Pases a closer', def:'Pases ÷ agendadas.', pct:ds=>[get(ds,'pases'),get(ds,'agendadas')]},
+    ],
+    closer:[
+      {label:'% Ocupación', def:'Llamadas tomadas ÷ disponibilidad.', pct:ds=>[get(ds,'llamadas'),get(ds,'disponibilidad')]},
+      {label:'% Cierre', def:'Cierres ÷ ofertas presentadas.', pct:ds=>[get(ds,'cierres'),get(ds,'ofertas')]},
+      {label:'Cash total', def:'Cash nuevo + cash de cuotas.', money:ds=>get(ds,'cash_nuevo')+get(ds,'cash_cuotas')},
+    ],
+  };
+  const T=todayStr(); let out='';
+  (defs[role]||[]).forEach(d=>{
+    let cells='', tot=0, ta=0, tb=0;
+    dayList.forEach(ds=>{ const isT=ds===T;
+      if(d.pct){ const [a,b]=d.pct(ds); ta+=a; tb+=b; const p=pct(a,b); cells+=`<td class="${isT?'today':''}">${p===null?'·':p+'%'}</td>`; }
+      else { const v=d.num?d.num(ds):d.money(ds); tot+=v; cells+=`<td class="${isT?'today':''}">${v?(d.money?money(v):v):'·'}</td>`; }
+    });
+    const totCell=d.pct?fmtPct(ta,tb):(d.money?money(tot):tot);
+    out+=`<tr class="drow"><td class="stickyc lbl" data-tip="${esc(d.def)}">${d.label}</td>${cells}<td class="tot">${totCell}</td></tr>`;
+  });
+  return out;
+}
+window.setTblMember=(id)=>{ state.tblMember=id; renderTable(); };
+window.tblNav=(dir)=>{ const r=parseD(state.tblRef); r.setMonth(r.getMonth()+dir); state.tblRef=dstr(r); renderTable(); };
+window.tblEdit=(el)=>{
+  const key=state.tblMember+'|'+el.dataset.d;
+  if(!DB.entries[key]) DB.entries[key]={};
+  DB.entries[key][el.dataset.k]=Math.max(0,+el.value||0); save();
+  const sheet=document.querySelector('.sheet'); const sx=sheet?sheet.scrollLeft:0, sy=sheet?sheet.scrollTop:0;
+  renderTable();
+  const s2=document.querySelector('.sheet'); if(s2){ s2.scrollLeft=sx; s2.scrollTop=sy; }
+  toast('Guardado');
 };
 
 // ---------- Equipo ----------
@@ -725,6 +855,7 @@ window.delSale=(id)=>{ DB.sales=DB.sales.filter(s=>s.id!==id); save(); renderSal
 
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function info(tip){ return `<span class="info" data-tip="${esc(tip)}">i</span>`; }
 function footer(){ return `<div class="footnote">
   <span>Maze Sales Tracker IA · v1 funcional</span><span class="dot2"></span>
   <span>Datos guardados en este navegador</span><span class="dot2"></span>
