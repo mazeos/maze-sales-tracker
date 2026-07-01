@@ -11,7 +11,7 @@
   :root{
     --onyx:#0B0B0F; --surface:#131319; --surface-2:#1A1A22; --line:#26262F;
     --ink:#F3F3F0; --muted:#8B8B99; --faint:#5A5A68;
-    --lima:#C5FF49; --lima-dim:#8FB833; --lime-ink:#C5FF49; --danger:#F2555A; --amber:#F5B14C; --violet:#6C5CE7;
+    --lima:#C5FF49; --lima-dim:#8FB833; --lime-ink:#C5FF49; --on-accent:#0B0B0F; --danger:#F2555A; --amber:#F5B14C; --violet:#6C5CE7;
     --r:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -37,7 +37,7 @@
   .brand svg{width:22px;height:22px}
   .nav-i{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;color:var(--faint);transition:.18s;font-size:17px;position:relative}
   .nav-i:hover{color:var(--ink);background:var(--surface)}
-  .nav-i.on{color:var(--onyx);background:var(--lima)}
+  .nav-i.on{color:var(--on-accent);background:var(--lima)}
   .nav-i .tt{position:absolute;left:52px;top:50%;transform:translateY(-50%);background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12px;padding:4px 9px;border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;transition:.15s;z-index:20}
   .nav-i:hover .tt{opacity:1}
   .rail .spacer{flex:1}
@@ -54,7 +54,7 @@
   .chip{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);color:var(--ink);padding:8px 12px;border-radius:10px;font-size:13px;font-weight:500;transition:.18s}
   .chip:hover{border-color:#39394a}
   .chip .k{color:var(--muted);font-size:11.5px}
-  .chip.primary{background:var(--lima);color:var(--onyx);border-color:var(--lime-ink);font-weight:600}
+  .chip.primary{background:var(--lima);color:var(--on-accent);border-color:var(--lime-ink);font-weight:600}
   .chip.icon{padding:8px 11px}
   select.chip{-webkit-appearance:none;appearance:none;padding-right:26px;background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238B8B99' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
 
@@ -154,7 +154,7 @@
   .tap .num{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;min-width:38px;text-align:right}
   .step{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:19px;font-weight:700;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);transition:.12s}
   .step:hover{border-color:#44444f}
-  .step.plus{background:var(--lima);color:var(--onyx);border-color:var(--lime-ink)}
+  .step.plus{background:var(--lima);color:var(--on-accent);border-color:var(--lime-ink)}
   .step.plus:active{transform:scale(.9)}
   .cap-save{margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:12.5px;color:var(--muted)}
   .cap-save b{color:var(--lime-ink)}
@@ -166,7 +166,7 @@
   .field label{font-size:12px;color:var(--muted);font-weight:500}
   .inp{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink);font-size:14px;width:100%}
   .inp:focus{outline:none;border-color:var(--lima-dim)}
-  .btn{background:var(--lima);color:var(--onyx);border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px}
+  .btn{background:var(--lima);color:var(--on-accent);border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px}
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
   .btn.sm{padding:7px 12px;font-size:13px}
   .btn.danger{background:transparent;border:1px solid rgba(242,85,90,.4);color:var(--danger)}
@@ -185,7 +185,7 @@
   .mini .l{font-size:11.5px;color:var(--muted);margin-bottom:5px}
   .mini .v{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;letter-spacing:-.02em}
 
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--lima);color:var(--onyx);font-weight:600;font-size:13px;padding:10px 18px;border-radius:100px;opacity:0;transition:.25s;z-index:100;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--lima);color:var(--on-accent);font-weight:600;font-size:13px;padding:10px 18px;border-radius:100px;opacity:0;transition:.25s;z-index:100;box-shadow:0 8px 30px rgba(0,0,0,.4)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   .footnote{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;color:var(--faint);font-size:12px;flex-wrap:wrap}
@@ -204,7 +204,7 @@
   .cap-intro p{font-size:13px;color:var(--muted);line-height:1.5}
   .cap-intro b{color:var(--ink)}
   .savepill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--lima-dim);background:rgba(197,255,73,.08);border:1px solid rgba(197,255,73,.2);padding:6px 11px;border-radius:100px;transition:.2s}
-  .savepill.flash{color:var(--onyx);background:var(--lima);border-color:var(--lime-ink)}
+  .savepill.flash{color:var(--on-accent);background:var(--lima);border-color:var(--lime-ink)}
   .cap-done{margin-top:16px;display:flex;justify-content:flex-end}
 
   /* vista tabla (Google Sheets / Airtable) */
@@ -244,6 +244,18 @@
   body[data-theme="light"] .grid tr.drow td.tot{background:#edefe4}
   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
+  /* contraste de roles/tags en claro */
+  body[data-theme="light"] .pill.setter,
+  body[data-theme="light"] .rep.setter .rav{color:#5b45d6;background:rgba(108,92,231,.12)}
+  body[data-theme="light"] .pill.triage,
+  body[data-theme="light"] .rep.triage .rav,
+  body[data-theme="light"] .tag.warn,
+  body[data-theme="light"] .rep .kpi .n.warn{color:#9a6a0a}
+  body[data-theme="light"] .tag.warn{background:rgba(245,177,76,.16)}
+  body[data-theme="light"] .tag.bad,
+  body[data-theme="light"] .rep .kpi .n.bad,
+  body[data-theme="light"] .conv.bad{color:#c8353a}
+  body[data-theme="light"] .nav-i{color:#8a8a95}
 
   /* ---------- Configuraciones (miembros editables) ---------- */
   .cfg-member{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
