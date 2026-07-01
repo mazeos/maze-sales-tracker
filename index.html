@@ -10,7 +10,7 @@
 <style>
   :root{
     --onyx:#0B0B0F; --surface:#131319; --surface-2:#1A1A22; --line:#26262F;
-    --ink:#F3F3F0; --muted:#8B8B99; --faint:#5A5A68;
+    --ink:#F3F3F0; --muted:#8B8B99; --faint:#86868F;
     --lima:#C5FF49; --lima-dim:#8FB833; --lime-ink:#C5FF49; --on-accent:#0B0B0F; --danger:#F2555A; --amber:#F5B14C; --violet:#6C5CE7;
     --r:14px;
   }
@@ -213,8 +213,8 @@
   table.grid{border-collapse:separate;border-spacing:0;font-size:12.5px;width:auto}
   table.grid th,table.grid td{border-bottom:1px solid #1e1e26;border-right:1px solid #1e1e26;text-align:center;white-space:nowrap}
   .grid thead th{position:sticky;top:0;background:var(--surface-2);z-index:2;color:var(--muted);font-weight:600;font-size:11px;padding:5px 7px;min-width:42px;height:40px}
-  .grid thead th.today{background:rgba(197,255,73,.14);color:var(--lime-ink)}
-  .grid .dow{font-size:9px;color:var(--faint);font-weight:400;margin-top:1px}
+  .grid thead th.today{color:var(--lime-ink);box-shadow:inset 0 -2px 0 var(--lima)}
+  .grid .dow{font-size:9px;color:var(--muted);font-weight:400;margin-top:1px}
   .grid .stickyc{position:sticky;left:0;background:var(--surface-2);z-index:3;text-align:left;padding:8px 13px;min-width:158px;max-width:158px;font-family:'Hanken Grotesk';font-weight:600;font-size:12px;border-right:1px solid var(--line)}
   .grid thead .stickyc{z-index:4}
   .grid td.tot{position:sticky;right:0;background:var(--surface-2);font-family:'JetBrains Mono';font-weight:700;min-width:66px;z-index:1;padding:7px 9px;color:var(--lime-ink)}
@@ -233,7 +233,7 @@
   /* ---------- Tema claro ---------- */
   body[data-theme="light"]{
     --onyx:#F5F5EF; --surface:#FFFFFF; --surface-2:#F1F1EA; --line:#E4E4DC;
-    --ink:#191920; --muted:#63636F; --faint:#9A9AA4; --lime-ink:#4E7A12; --lima-dim:#5F8F1E;
+    --ink:#191920; --muted:#63636F; --faint:#6B6B75; --lime-ink:#43670E; --lima-dim:#4E7A12; --danger:#C8353A;
   }
   body[data-theme="light"]::before{background:
     radial-gradient(900px 600px at 88% -8%, rgba(108,92,231,.08), transparent 60%),
@@ -251,7 +251,7 @@
   body[data-theme="light"] .pill.triage,
   body[data-theme="light"] .rep.triage .rav,
   body[data-theme="light"] .tag.warn,
-  body[data-theme="light"] .rep .kpi .n.warn{color:#9a6a0a}
+  body[data-theme="light"] .rep .kpi .n.warn{color:#7d5300}
   body[data-theme="light"] .tag.warn{background:rgba(245,177,76,.16)}
   body[data-theme="light"] .tag.bad,
   body[data-theme="light"] .rep .kpi .n.bad,
