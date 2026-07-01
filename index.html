@@ -245,6 +245,41 @@
   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
 
+  /* ---------- Desglose (drill-down) ---------- */
+  .clik{cursor:pointer;transition:.14s;border-radius:5px}
+  .clik:hover{color:var(--lime-ink)}
+  .cnt.clik:hover,.conv.clik:hover{filter:brightness(1.15)}
+  td.clik:hover{background:rgba(197,255,73,.06)}
+  .drill-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:56px 20px;overflow-y:auto}
+  .drill{background:var(--surface);border:1px solid var(--line);border-radius:16px;width:100%;max-width:560px;padding:22px 24px;box-shadow:0 30px 90px rgba(0,0,0,.55);position:relative;animation:drillin .17s ease}
+  @keyframes drillin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .drill-x{position:absolute;top:15px;right:15px;width:30px;height:30px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);font-size:13px}
+  .drill-x:hover{color:var(--ink)}
+  .drill-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:8px;padding-right:34px}
+  .drill-head h3{font-family:'Fraunces',serif;font-weight:500;font-size:19px;margin-top:2px}
+  .drill-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:23px;color:var(--lime-ink);white-space:nowrap}
+  .drill-def{color:var(--muted);font-size:13px;margin-bottom:4px}
+  .dsec{margin-top:16px}
+  .dh{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  .dh .hint{text-transform:none;letter-spacing:0;font-weight:400}
+  .formula{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .ftok{font-size:13px;color:var(--muted)} .ftok b{color:var(--ink);font-family:'JetBrains Mono';font-weight:700;margin-right:4px}
+  .ftok.tot b{color:var(--lime-ink)}
+  .fop{color:var(--faint);font-weight:700}
+  table.dtable{width:100%;border-collapse:collapse}
+  table.dtable td{padding:8px 6px;border-bottom:1px solid var(--line);font-size:13px}
+  table.dtable tr:last-child td{border-bottom:none}
+  table.dtable td.v{text-align:right;font-family:'JetBrains Mono';font-weight:600}
+  table.dtable td.pctcell{text-align:right;width:52px;color:var(--muted);font-family:'JetBrains Mono'}
+  .dtable .rl{font-size:11px;color:var(--faint)}
+  .daylist{display:flex;flex-direction:column;gap:5px;max-height:230px;overflow-y:auto}
+  .dayrow{display:grid;grid-template-columns:66px 1fr auto;gap:10px;align-items:center;font-size:12.5px}
+  .dayrow .dd{color:var(--muted)}
+  .dayrow .dbar{height:7px;background:var(--surface-2);border-radius:100px;overflow:hidden}
+  .dayrow .dbar span{display:block;height:100%;background:linear-gradient(90deg,var(--lima-dim),var(--lima))}
+  .dayrow .dfrac{color:var(--faint);font-family:'JetBrains Mono';font-size:11.5px}
+  .dayrow .dv{font-family:'JetBrains Mono';font-weight:700;text-align:right;min-width:44px}
+
   @media(max-width:960px){
     .app{grid-template-columns:60px 1fr}
     .main{padding:18px 16px 60px}
@@ -511,11 +546,11 @@ function renderDashboard(){
     const h = Math.max(4, Math.round(s.v/maxV*100));
     let conv='';
     if(i>0){ const prev=f.stages[i-1].v; const p=pct(s.v,prev);
-      if(p!==null){ const cls = s.money?'good':(p<35?'bad':(p>=65?'good':'')); conv=`<div class="conv ${cls}">${s.money?money(s.v):p+'%'}</div>`; }
+      if(p!==null){ const cls = s.money?'good':(p<35?'bad':(p>=65?'good':'')); const cc=s.money?"drillStage('cash')":`drillConv('${f.stages[i-1].key}','${s.key}')`; conv=`<div class="conv ${cls} clik" onclick="${cc}">${s.money?money(s.v):p+'%'}</div>`; }
     }
     bars+=`<div class="stage ${s.money?'cash':''}">
       <div class="bar" style="height:${h}%"><div class="node"></div></div>${conv}
-      <div class="cnt">${s.money?money(s.v):num(s.v)}</div>
+      <div class="cnt clik" onclick="drillStage('${s.key}')">${s.money?money(s.v):num(s.v)}</div>
       <div class="lbl"><span class="tip" title="${s.tip}">${s.label}</span></div>
     </div>`;
   });
@@ -525,9 +560,9 @@ function renderDashboard(){
         <h2>Dónde entra el volumen y dónde se fuga ${info('El embudo del equipo: cada etapa muestra el total y el % que pasa a la siguiente. En rojo, las fugas (conversión baja); en lima, lo sano.')}</h2>
         <div class="lead">Todo se carga como conteo. Las tasas se calculan solas — nunca a mano.</div></div>
       <div class="hero-kpis">
-        ${hk('Cash collected', money(f.cash), goalStr('cash_nuevo'))}
-        ${hk('Cierres', num(f.cierres), goalStr('cierres'))}
-        ${hk('Lead → cierre', leadCierre, '')}
+        ${hk('Cash collected', money(f.cash), goalStr('cash_nuevo'), "drillStage('cash')")}
+        ${hk('Cierres', num(f.cierres), goalStr('cierres'), "drillStage('cierres')")}
+        ${hk('Lead → cierre', leadCierre, '', "drillLead()")}
       </div>
     </div>
     <div class="funnel" style="grid-template-columns:repeat(${f.stages.length},1fr)">${bars}</div>
@@ -535,7 +570,7 @@ function renderDashboard(){
   const gridRow=`<div class="row">${pacingCard()}${repsCard(r)}${coachCard(r,f)}</div>`;
   VIEW.innerHTML = topbar(periodControls()) + hero + gridRow + rollupSection() + footer();
 }
-function hk(l,v,sub){ return `<div class="hk"><div class="l">${l}</div><div class="v">${v} ${sub?`<small>${sub}</small>`:''}</div></div>`; }
+function hk(l,v,sub,click){ return `<div class="hk ${click?'clik':''}" ${click?`onclick="${click}"`:''}><div class="l">${l}</div><div class="v">${v} ${sub?`<small>${sub}</small>`:''}</div></div>`; }
 function goalStr(metric){ const g=DB.goals.week&&DB.goals.week[metric]; if(!g) return ''; return '/ '+(metric.indexOf('cash')>=0?money(g):g); }
 
 function pacingCard(){
@@ -574,13 +609,13 @@ function repsCard(r){
     const s=sumMember(m.id,r.start,r.end); let kpis='';
     if(m.role==='setter'){
       const links=(s.links_ig||0)+(s.links_wpp||0), agend=(s.agend_ig||0)+(s.agend_wpp||0);
-      kpis=kpi(num(agend),'agendados')+kpi(fmtPct(agend,links),'link→agenda');
+      kpis=kpi(num(agend),'agendados','',`drillRep('${m.id}','agendados')`)+kpi(fmtPct(agend,links),'link→agenda','',`drillRep('${m.id}','linkagenda')`);
     } else if(m.role==='triage'){
-      kpis=kpi(fmtPct(s.asistencias,s.agendadas),'asistencia')+kpi(num(s.pases),'pases');
+      kpis=kpi(fmtPct(s.asistencias,s.agendadas),'asistencia','',`drillRep('${m.id}','asistencia')`)+kpi(num(s.pases),'pases','',`drillRep('${m.id}','pases')`);
     } else {
       const cierrePct=pct(s.cierres,s.ofertas), ocup=pct(s.llamadas,s.disponibilidad);
-      kpis=kpi(fmtPct(s.cierres,s.ofertas),'cierre', cierrePct!==null&&cierrePct<30?'bad':'')
-          +kpi(fmtPct(s.llamadas,s.disponibilidad),'ocupación', ocup!==null&&ocup>=80?'warn':'');
+      kpis=kpi(fmtPct(s.cierres,s.ofertas),'cierre', cierrePct!==null&&cierrePct<30?'bad':'', `drillRep('${m.id}','cierre')`)
+          +kpi(fmtPct(s.llamadas,s.disponibilidad),'ocupación', ocup!==null&&ocup>=80?'warn':'', `drillRep('${m.id}','ocupacion')`);
     }
     rows+=`<div class="rep ${m.role}"><div class="rav">${esc(m.name[0]||'?').toUpperCase()}</div>
       <div><div class="who">${esc(m.name)}</div><div class="role">${ROLE_LABEL[m.role]}</div></div>
@@ -589,7 +624,7 @@ function repsCard(r){
   if(!DB.members.length) rows=`<div class="empty">Sin miembros. Agregalos en <b>Equipo</b>.</div>`;
   return `<div class="card"><div class="card-head"><div><div class="eyebrow">Equipo</div><h3 style="margin-top:4px">Rendimiento por persona ${info('Los 2 KPIs clave de cada rol. En ámbar/rojo cuando hay que prestar atención (ej: closer >80% de ocupación, cierre <30%).')}</h3></div><span class="badge" style="border:none;color:var(--faint)">${DB.members.length} activos</span></div><div class="reps">${rows}</div></div>`;
 }
-function kpi(n,t,cls){ return `<div class="kpi"><div class="n ${cls||''}">${n}</div><div class="t">${t}</div></div>`; }
+function kpi(n,t,cls,click){ return `<div class="kpi ${click?'clik':''}" ${click?`onclick="${click}"`:''}><div class="n ${cls||''}">${n}</div><div class="t">${t}</div></div>`; }
 
 function coachCard(r,f){
   const msg = coachRead(r,f);
@@ -620,13 +655,109 @@ function rollupSection(){
   rows.forEach(([t,label])=>{
     const rr=range(t, ref); const f=funnel(rr.start,rr.end);
     const ag=f.stages.find(s=>s.key==='agendados').v;
-    trs+=`<tr><td>${label}</td><td>${num(f.conversaciones)}</td><td>${num(ag)}</td><td>${num(f.cierres)}</td><td>${money(f.cash)}</td></tr>`;
+    trs+=`<tr><td>${label}</td><td class="clik" onclick="drillCell('${t}','conversaciones')">${num(f.conversaciones)}</td><td class="clik" onclick="drillCell('${t}','agendados')">${num(ag)}</td><td class="clik" onclick="drillCell('${t}','cierres')">${num(f.cierres)}</td><td class="clik" onclick="drillCell('${t}','cash')">${money(f.cash)}</td></tr>`;
   });
   return `<div class="section"><div class="eyebrow">Resumen automático · todos los roles (incluido setter) ${info('Los mismos números sumados por período: hoy, esta semana, este mes, trimestre y año. Se calcula solo — esto en la planilla no estaba automatizado para setters.')}</div>
     <div class="rollup"><table>
       <thead><tr><th>Período</th><th>Conversaciones</th><th>Agendados</th><th>Cierres</th><th>Cash</th></tr></thead>
       <tbody>${trs}</tbody></table></div></div>`;
 }
+
+// ---------- Desglose (drill-down): la historia detrás del número ----------
+function curPeriod(){ return range(state.ptype, parseD(state.ref)); }
+function keyLabels(role){ const m={}; (METRICS[role]||[]).forEach(x=>m[x.k]=x.label); return m; }
+const STAGE_SPEC={
+  conversaciones:{label:'Conversaciones nuevas',def:'Outbound + todos los inbound del período.',roles:['setter'],keys:['outbound','inbound_ig','inbound_wpp_tk','inbound_wpp_ig']},
+  respuestas:{label:'Respuestas',def:'Respuestas obtenidas a los mensajes.',roles:['setter'],keys:['respuestas']},
+  links:{label:'Links enviados',def:'Links de agenda enviados (IG + Wpp).',roles:['setter'],keys:['links_ig','links_wpp']},
+  agendados:{label:'Agendados',def:'Llamadas agendadas por el setter (IG + Wpp).',roles:['setter'],keys:['agend_ig','agend_wpp']},
+  asistencias:{label:'Asistencias',def:'Personas que asistieron a las llamadas.',roles:['closer'],keys:['asistencias']},
+  ofertas:{label:'Ofertas',def:'Ofertas presentadas por el closer.',roles:['closer'],keys:['ofertas']},
+  cierres:{label:'Cierres',def:'Ventas cerradas.',roles:['closer'],keys:['cierres']},
+  cash:{label:'Cash collected',def:'Cash líquido nuevo que entró.',roles:['closer'],keys:['cash_nuevo'],money:true},
+};
+function _drillMembers(roles, memberId){ if(memberId){ const m=DB.members.find(x=>x.id===memberId); return m?[m]:[]; } return DB.members.filter(m=>roles.indexOf(m.role)>=0); }
+function drillAgg(roles, keys, start, end, memberId){
+  const members=_drillMembers(roles, memberId); const ids={}; members.forEach(m=>ids[m.id]=1);
+  let total=0; const byMember={}, byDay={}, byKey={};
+  members.forEach(m=>byMember[m.id]=0); keys.forEach(k=>byKey[k]=0);
+  for(const key in DB.entries){ const i=key.indexOf('|'); const mid=key.slice(0,i), ds=key.slice(i+1);
+    if(!ids[mid]||ds<start||ds>end) continue;
+    let v=0; keys.forEach(k=>{ const kv=(+DB.entries[key][k]||0); v+=kv; byKey[k]+=kv; });
+    total+=v; byMember[mid]+=v; byDay[ds]=(byDay[ds]||0)+v; }
+  return {total, byMember, byDay, byKey, members};
+}
+function memberTable(a, isMoney){
+  if(a.members.length<=1) return '';
+  const rows=a.members.map(m=>({m,v:a.byMember[m.id]||0})).sort((x,y)=>y.v-x.v);
+  const tot=rows.reduce((s,r)=>s+r.v,0)||1;
+  const tr=rows.map(r=>`<tr><td>${esc(r.m.name)} <span class="rl">${ROLE_LABEL[r.m.role]}</span></td><td class="v">${isMoney?money(r.v):num(r.v)}</td><td class="pctcell">${Math.round(r.v/tot*100)}%</td></tr>`).join('');
+  return `<div class="dsec"><div class="dh">Por persona</div><table class="dtable">${tr}</table></div>`;
+}
+function rateMemberTable(A,B){
+  if(A.members.length<=1) return '';
+  const tr=A.members.map(m=>{ const a=A.byMember[m.id]||0,b=B.byMember[m.id]||0,p=pct(a,b); return `<tr><td>${esc(m.name)}</td><td class="v">${a} ÷ ${b}</td><td class="pctcell">${p===null?'—':p+'%'}</td></tr>`; }).join('');
+  return `<div class="dsec"><div class="dh">Por persona</div><table class="dtable">${tr}</table></div>`;
+}
+function dayTable(byDay, isMoney){
+  const days=Object.keys(byDay).filter(d=>byDay[d]).sort();
+  if(!days.length) return `<div class="dsec"><div class="dh">Día por día</div><div class="empty">Sin datos cargados en el período.</div></div>`;
+  const max=Math.max.apply(null, days.map(d=>byDay[d]).concat(1));
+  const rows=days.map(d=>{ const v=byDay[d], w=Math.round(v/max*100), dd=parseD(d); return `<div class="dayrow"><span class="dd">${dd.getDate()} ${MONTHS[dd.getMonth()]}</span><span class="dbar"><span style="width:${w}%"></span></span><span class="dv">${isMoney?money(v):v}</span></div>`; }).join('');
+  return `<div class="dsec"><div class="dh">Día por día <span class="hint">(suman el total)</span></div><div class="daylist">${rows}</div></div>`;
+}
+function dayTableRate(Ad,Bd){
+  const set={}; Object.keys(Ad).forEach(d=>set[d]=1); Object.keys(Bd).forEach(d=>set[d]=1);
+  const days=Object.keys(set).filter(d=>(Ad[d]||Bd[d])).sort();
+  if(!days.length) return '';
+  const rows=days.map(d=>{ const a=Ad[d]||0,b=Bd[d]||0,p=pct(a,b),dd=parseD(d); return `<div class="dayrow"><span class="dd">${dd.getDate()} ${MONTHS[dd.getMonth()]}</span><span class="dfrac">${a} ÷ ${b}</span><span class="dv">${p===null?'·':p+'%'}</span></div>`; }).join('');
+  return `<div class="dsec"><div class="dh">Día por día</div><div class="daylist">${rows}</div></div>`;
+}
+function buildDrill(spec){
+  const P=spec.period; let headline, body='';
+  if(spec.kind==='sum'){
+    const a=drillAgg(spec.roles, spec.keys, P.start, P.end, spec.memberId);
+    headline=spec.money?money(a.total):num(a.total);
+    if(spec.keys.length>1){
+      const L=keyLabels(spec.roles[0]);
+      const toks=spec.keys.map(k=>`<span class="ftok"><b>${spec.money?money(a.byKey[k]):a.byKey[k]}</b>${esc(L[k]||k)}</span>`).join('<span class="fop">+</span>');
+      body+=`<div class="dsec"><div class="dh">Cómo se forma</div><div class="formula">${toks}<span class="fop">=</span><span class="ftok tot"><b>${headline}</b></span></div></div>`;
+    }
+    body+=memberTable(a, spec.money)+dayTable(a.byDay, spec.money);
+  } else {
+    const A=drillAgg(spec.num.roles, spec.num.keys, P.start, P.end, spec.memberId);
+    const B=drillAgg(spec.den.roles, spec.den.keys, P.start, P.end, spec.memberId);
+    const p=pct(A.total,B.total); headline=p===null?'—':p+'%';
+    body+=`<div class="dsec"><div class="dh">Cómo se forma</div><div class="formula"><span class="ftok"><b>${num(A.total)}</b>${esc(spec.num.label)}</span><span class="fop">÷</span><span class="ftok"><b>${num(B.total)}</b>${esc(spec.den.label)}</span><span class="fop">=</span><span class="ftok tot"><b>${headline}</b></span></div></div>`;
+    if(!spec.memberId && spec.num.roles.join()===spec.den.roles.join()) body+=rateMemberTable(A,B);
+    body+=dayTableRate(A.byDay,B.byDay);
+  }
+  return `<div class="drill-head"><div><div class="eyebrow">${esc(P.label)}</div><h3>${esc(spec.label)}</h3></div><div class="drill-val">${headline}</div></div><p class="drill-def">${esc(spec.def||'')}</p>${body}`;
+}
+function openDrill(spec){
+  let ov=document.getElementById('drillOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='drillOv'; ov.className='drill-overlay'; ov.addEventListener('click',e=>{ if(e.target===ov) closeDrill(); }); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="drill"><button class="drill-x" onclick="closeDrill()">✕</button>${buildDrill(spec)}</div>`;
+  ov.style.display='flex'; document.addEventListener('keydown', drillEsc);
+}
+function closeDrill(){ const ov=document.getElementById('drillOv'); if(ov) ov.style.display='none'; document.removeEventListener('keydown', drillEsc); }
+function drillEsc(e){ if(e.key==='Escape') closeDrill(); }
+window.drillStage=(k)=>{ const d=STAGE_SPEC[k]; let roles=d.roles.slice(); if(k==='asistencias' && membersByRole('closer').length===0) roles=['triage']; openDrill({kind:'sum',label:d.label,def:d.def,roles,keys:d.keys,money:d.money,period:curPeriod()}); };
+window.drillConv=(fromK,toK)=>{ const f=STAGE_SPEC[fromK], t=STAGE_SPEC[toK]; let troles=t.roles.slice(); if(toK==='asistencias'&&membersByRole('closer').length===0) troles=['triage']; openDrill({kind:'rate',label:'Conversión '+f.label+' → '+t.label,def:'Qué porcentaje de '+f.label.toLowerCase()+' llega a '+t.label.toLowerCase()+'.',num:{label:t.label,roles:troles,keys:t.keys},den:{label:f.label,roles:f.roles,keys:f.keys},period:curPeriod()}); };
+window.drillLead=()=>{ openDrill({kind:'rate',label:'Lead → cierre',def:'Qué % de las conversaciones nuevas termina en cierre.',num:{label:'Cierres',roles:['closer'],keys:['cierres']},den:{label:'Conversaciones',roles:['setter'],keys:['outbound','inbound_ig','inbound_wpp_tk','inbound_wpp_ig']},period:curPeriod()}); };
+window.drillCell=(ptype,metric)=>{ const d=STAGE_SPEC[metric]; let roles=d.roles.slice(); if(metric==='asistencias'&&membersByRole('closer').length===0) roles=['triage']; openDrill({kind:'sum',label:d.label,def:d.def,roles,keys:d.keys,money:d.money,period:range(ptype,parseD(state.ref))}); };
+window.drillRep=(mid,metric)=>{ const m=DB.members.find(x=>x.id===mid); if(!m) return; const r=m.role;
+  const S={
+    agendados:{kind:'sum',label:'Agendados — '+m.name,def:'Agendados IG + Wpp de esta persona.',roles:[r],keys:['agend_ig','agend_wpp']},
+    linkagenda:{kind:'rate',label:'Tasa link→agenda — '+m.name,def:'Agendados ÷ links enviados.',num:{label:'Agendados',roles:[r],keys:['agend_ig','agend_wpp']},den:{label:'Links',roles:[r],keys:['links_ig','links_wpp']}},
+    asistencia:{kind:'rate',label:'% Asistencia — '+m.name,def:'Asistencias ÷ agendadas.',num:{label:'Asistencias',roles:[r],keys:['asistencias']},den:{label:'Agendadas',roles:[r],keys:['agendadas']}},
+    pases:{kind:'sum',label:'Pases a closer — '+m.name,def:'Llamadas pasadas al closer.',roles:[r],keys:['pases']},
+    cierre:{kind:'rate',label:'% Cierre — '+m.name,def:'Cierres ÷ ofertas presentadas.',num:{label:'Cierres',roles:[r],keys:['cierres']},den:{label:'Ofertas',roles:[r],keys:['ofertas']}},
+    ocupacion:{kind:'rate',label:'% Ocupación — '+m.name,def:'Llamadas tomadas ÷ disponibilidad.',num:{label:'Llamadas',roles:[r],keys:['llamadas']},den:{label:'Disponibilidad',roles:[r],keys:['disponibilidad']}},
+  }[metric];
+  if(!S) return; S.memberId=mid; S.period=curPeriod(); openDrill(S);
+};
+window.closeDrill=closeDrill;
 
 // ---------- Cargar día ----------
 function renderCapture(){
