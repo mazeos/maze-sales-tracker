@@ -327,15 +327,20 @@
     <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="spacer"></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
-    <div class="nav-i" data-action="reset" title="Reiniciar datos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3 8.5"/><path d="M3 3.5v5h5"/></svg><span class="tt">Reiniciar demo</span></div>
+    <div class="nav-i" data-action="logout" title="Cerrar sesión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg><span class="tt">Cerrar sesión</span></div>
     <div class="avatar" title="Owner">A</div>
   </nav>
   <main class="main" id="view"></main>
 </div>
 <div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
 "use strict";
+const SB_URL='https://supabase.mazefunnels.io';
+const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzcyMzIwMDg0LCJleHAiOjIwODc2ODAwODR9.Qdqi7o23mq0aGvzigUzLlVyk9Eo0Sr8vtEmImquTqOw';
+const sb=window.supabase.createClient(SB_URL,SB_ANON,{auth:{persistSession:true,autoRefreshToken:true}});
+let ME=null, IS_ADMIN=false;
 /* ============================================================
    Maze Sales Tracker IA — app funcional (client-side, localStorage)
    Modelo de datos con paridad a la planilla CAMINO DIGITAL.
@@ -393,7 +398,32 @@ function dstr(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'
 function parseD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function uid(){ return 'm'+Math.random().toString(36).slice(2,8); }
 
-function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+function save(){ try{localStorage.setItem(KEY, JSON.stringify(DB));}catch(e){} schedulePush(); }
+let _pt;
+function schedulePush(){ if(!ME) return; clearTimeout(_pt); _pt=setTimeout(pushToSupabase,600); }
+async function pushToSupabase(){
+  if(!ME||!DB.team.id) return;
+  const rows=[]; for(const k in DB.entries){ const i=k.indexOf('|'); const mid=k.slice(0,i), ds=k.slice(i+1); if(IS_ADMIN||mid===ME.id) rows.push({org_id:DB.team.id,member_id:mid,entry_date:ds,metrics:DB.entries[k]}); }
+  if(rows.length){ const {error}=await sb.from('st_entries').upsert(rows,{onConflict:'member_id,entry_date'}); if(error) console.warn('entries',error.message); }
+  if(IS_ADMIN){
+    await sb.from('st_orgs').update({name:DB.team.name,team_mode:DB.team.mode,tz:DB.team.tz}).eq('id',DB.team.id);
+    for(const m of DB.members){ await sb.from('st_profiles').update({name:m.name,role:m.role,commission:m.commission||0}).eq('id',m.id); }
+    await sb.from('st_goals').upsert({org_id:DB.team.id,period:'week',goals:DB.goals.week||{}},{onConflict:'org_id,period'});
+  }
+}
+async function loadFromSupabase(){
+  const org=(await sb.from('st_orgs').select('*').eq('id',ME.org_id).single()).data;
+  const profs=(await sb.from('st_profiles').select('*').eq('org_id',ME.org_id)).data||[];
+  const ents=(await sb.from('st_entries').select('*').eq('org_id',ME.org_id)).data||[];
+  const goalRow=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).eq('period','week').maybeSingle()).data;
+  const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
+  const order={admin:0,setter:1,triage:2,closer:3};
+  DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz},
+      members:profs.filter(p=>p.role!=='admin').sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
+      entries:{}, goals:{week:(goalRow&&goalRow.goals)||{}},
+      sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente}))};
+  ents.forEach(e=>{ DB.entries[e.member_id+'|'+e.entry_date]=e.metrics||{}; });
+}
 function load(){
   const raw = localStorage.getItem(KEY);
   if(raw){ try{ DB = JSON.parse(raw); return; }catch(e){} }
@@ -515,7 +545,7 @@ function go(view){ state.view=view; render(); }
 document.querySelectorAll('.nav-i').forEach(el=>{
   el.addEventListener('click',()=>{
     if(el.dataset.action==='theme'){ toggleTheme(); return; }
-    if(el.dataset.action==='reset'){ if(confirm('¿Reiniciar los datos de demo? Se pierde lo cargado en este navegador.')) resetDemo(); return; }
+    if(el.dataset.action==='logout'){ if(confirm('¿Cerrar sesión?')) doLogout(); return; }
     go(el.dataset.view);
   });
 });
@@ -786,13 +816,14 @@ window.closeDrill=closeDrill;
 
 // ---------- Cargar día ----------
 function renderCapture(){
+  if(!IS_ADMIN && ME) state.capMember = ME.id;
   if(!state.capMember || !DB.members.find(m=>m.id===state.capMember)) state.capMember = DB.members[0]?DB.members[0].id:null;
   if(!state.capDate) state.capDate = todayStr();
   const member = DB.members.find(m=>m.id===state.capMember);
   let body='';
   if(!member){ body=`<div class="empty">No hay miembros. Andá a <b>Equipo</b> y agregá al menos uno.</div>`; }
   else {
-    const memberOpts = DB.members.map(m=>`<option value="${m.id}" ${state.capMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
+    const memberOpts = (IS_ADMIN?DB.members:DB.members.filter(m=>m.id===ME.id)).map(m=>`<option value="${m.id}" ${state.capMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
     const key = state.capMember+'|'+state.capDate;
     const cur = DB.entries[key]||{};
     let taps='';
@@ -858,6 +889,7 @@ function renderTable(){
   let body='';
   if(!member){ body=`<div class="empty">No hay miembros. Andá a <b>Equipo</b> y agregá al menos uno.</div>`; }
   else {
+    const canEdit=IS_ADMIN||(ME&&state.tblMember===ME.id);
     const ref=parseD(state.tblRef); const y=ref.getFullYear(), mo=ref.getMonth();
     const days=new Date(y,mo+1,0).getDate();
     const dayList=[]; for(let d=1;d<=days;d++) dayList.push(dstr(new Date(y,mo,d)));
@@ -872,7 +904,7 @@ function renderTable(){
     METRICS[member.role].forEach(mt=>{
       let tot=0, cells='';
       dayList.forEach(ds=>{ const key=state.tblMember+'|'+ds; const v=(DB.entries[key]&&+DB.entries[key][mt.k])||0; tot+=v; const isT=ds===T;
-        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)"></td>`; });
+        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)" ${canEdit?'':'readonly'}></td>`; });
       rows+=`<tr><td class="stickyc lbl" data-tip="${esc(mt.def)}">${mt.label}</td>${cells}<td class="tot">${mt.money?money(tot):tot}</td></tr>`;
     });
     // filas derivadas (tasas, read-only)
@@ -1038,15 +1070,18 @@ function renderSales(){
         <tbody>${rows}</tbody></table></div></div>` + footer();
 }
 function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
-window.addSale=()=>{
+window.addSale=async()=>{
   const g=(id)=>document.getElementById(id).value;
   const cliente=(g('s_cliente')||'').trim(); if(!cliente){ toast('Poné el cliente'); return; }
-  DB.sales.push({id:uid(), date:todayStr(), cliente, programa:g('s_programa')||'—', metodo:g('s_metodo')||'—',
-    facturado:+g('s_fact')||0, cash:+g('s_cash')||0, cuotas:0, reserva:0,
-    closer:g('s_closer'), triage:g('s_triage'), setter:g('s_setter'), fuente:g('s_fuente')||'—'});
-  save(); toast('Venta registrada'); renderSales();
+  const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
+    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:0,reserva:0,
+    closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
+  const {data,error}=await sb.from('st_sales').insert(row).select().single();
+  if(error){ toast('No se pudo (permiso)'); return; }
+  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:0,reserva:0,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
+  toast('Venta registrada'); renderSales();
 };
-window.delSale=(id)=>{ DB.sales=DB.sales.filter(s=>s.id!==id); save(); renderSales(); };
+window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); renderSales(); };
 
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1082,7 +1117,44 @@ applyTheme((function(){ try{ return localStorage.getItem('maze_theme')||'dark'; 
 })();
 
 // ---------- init ----------
-load(); render();
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){ renderLogin(); return; }
+  const {data:prof}=await sb.from('st_profiles').select('*').eq('id',session.user.id).maybeSingle();
+  if(!prof){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
+  ME={id:prof.id,role:prof.role,name:prof.name,org_id:prof.org_id}; IS_ADMIN=prof.role==='admin';
+  await loadFromSupabase();
+  state.capMember = IS_ADMIN ? (DB.members[0]&&DB.members[0].id) : ME.id;
+  state.tblMember = state.capMember;
+  document.getElementById('loginOv') && (document.getElementById('loginOv').style.display='none');
+  document.querySelector('.app').style.display='';
+  render();
+}
+function renderLogin(msg){
+  document.querySelector('.app').style.display='none';
+  let ov=document.getElementById('loginOv'); if(!ov){ ov=document.createElement('div'); ov.id='loginOv'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(900px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--onyx)';
+  ov.innerHTML=`<form onsubmit="return doLogin(event)" style="width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:30px 28px;box-shadow:0 30px 90px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:18px"><div class="brand" style="width:34px;height:34px;margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/></svg></div><b style="font-family:Fraunces,serif;font-weight:500;font-size:18px">Maze Sales Tracker</b></div>
+    <h2 style="font-family:Fraunces,serif;font-weight:500;font-size:21px;margin-bottom:4px">Entrá a tu cuenta</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:18px">Cargá y mirá los números de tu equipo.</p>
+    ${msg?`<div style="background:rgba(242,85,90,.1);border:1px solid rgba(242,85,90,.3);color:var(--danger);font-size:12.5px;padding:9px 11px;border-radius:9px;margin-bottom:12px">${esc(msg)}</div>`:''}
+    <input class="inp" id="lg_email" type="email" placeholder="Email" autocomplete="username" required style="margin-bottom:10px">
+    <input class="inp" id="lg_pass" type="password" placeholder="Contraseña" autocomplete="current-password" required style="margin-bottom:16px">
+    <button class="btn" type="submit" id="lg_btn" style="width:100%">Entrar</button>
+    <div id="lg_hint" style="color:var(--danger);font-size:12.5px;margin-top:10px;min-height:16px"></div>
+  </form>`;
+  ov.style.display='flex';
+}
+window.doLogin=async(ev)=>{ ev.preventDefault();
+  const email=document.getElementById('lg_email').value.trim(), pass=document.getElementById('lg_pass').value;
+  const btn=document.getElementById('lg_btn'); btn.textContent='Entrando…'; btn.disabled=true;
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){ document.getElementById('lg_hint').textContent='Email o contraseña incorrectos.'; btn.textContent='Entrar'; btn.disabled=false; return false; }
+  await boot(); return false;
+};
+window.doLogout=async()=>{ await sb.auth.signOut(); location.reload(); };
+boot();
 </script>
 </body>
 </html>
