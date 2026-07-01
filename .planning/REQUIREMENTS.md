@@ -101,17 +101,47 @@ Excluido explícitamente para prevenir scope creep.
 
 ## Traceability
 
-Se completa durante la creación del roadmap.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (pendiente de mapeo por el roadmapper) | — | Pending |
+| TEN-01 | Phase 1 | Pending |
+| TEN-02 | Phase 1 | Pending |
+| TEN-03 | Phase 1 | Pending |
+| TEN-04 | Phase 1 | Pending |
+| TEN-05 | Phase 1 | Pending |
+| MET-05 | Phase 1 | Pending |
+| DICT-01 | Phase 1 | Pending |
+| DICT-02 | Phase 1 | Pending |
+| CAP-01 | Phase 2 | Pending |
+| CAP-02 | Phase 2 | Pending |
+| CAP-03 | Phase 2 | Pending |
+| CAP-04 | Phase 2 | Pending |
+| CAP-05 | Phase 2 | Pending |
+| CAP-06 | Phase 2 | Pending |
+| MET-01 | Phase 2 | Pending |
+| MET-02 | Phase 2 | Pending |
+| MET-03 | Phase 2 | Pending |
+| MET-04 | Phase 2 | Pending |
+| SAL-01 | Phase 2 | Pending |
+| SAL-02 | Phase 2 | Pending |
+| SAL-03 | Phase 2 | Pending |
+| DASH-01 | Phase 3 | Pending |
+| DASH-02 | Phase 3 | Pending |
+| DASH-03 | Phase 3 | Pending |
+| DASH-04 | Phase 3 | Pending |
+| DASH-05 | Phase 3 | Pending |
+| GOAL-01 | Phase 4 | Pending |
+| GOAL-02 | Phase 4 | Pending |
+| GOAL-03 | Phase 4 | Pending |
+| AI-01 | Phase 5 | Pending |
+| AI-02 | Phase 5 | Pending |
+| AI-03 | Phase 5 | Pending |
+| AI-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 31 total
-- Mapped to phases: 0 (pendiente)
-- Unmapped: 31 ⚠️
+- v1 requirements: 33 total (la cuenta previa de "31" era un error de conteo del documento origen)
+- Mapped to phases: 33 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-30*
-*Last updated: 2026-06-30 after initial definition*
+*Last updated: 2026-06-30 after roadmap creation (traceability mapped)*
