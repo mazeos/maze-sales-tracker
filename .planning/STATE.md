@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-06-30 — Roadmap creado (5 fases, 33 requisitos mapeados)
+Last activity: 2026-07-02 - Completed quick task 260702-nhd: Gating admin-only en UI de Configuraciones y Metas
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -56,6 +56,12 @@ None yet.
 ### Blockers/Concerns
 
 - REQUIREMENTS.md declaraba "31 requisitos v1" pero hay 33 IDs reales; el roadmap mapea los 33. Traceability actualizada en consecuencia.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260702-nhd | Gating admin-only en UI de Configuraciones y Metas | 2026-07-02 | e94bf33 | [260702-nhd-gating-admin-only-en-ui-de-configuracion](./quick/260702-nhd-gating-admin-only-en-ui-de-configuracion/) |
 
 ## Deferred Items
 
