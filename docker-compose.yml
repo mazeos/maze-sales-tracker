@@ -7,7 +7,9 @@ services:
       - ./index.html:/usr/share/nginx/html/index.html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
+      # traefik-public: expuesta al reverse-proxy. default: red interna para hablar con `api`.
       - traefik-public
+      - default
     labels:
       - traefik.enable=true
       - traefik.http.routers.maze-sales-tracker.rule=Host(`sales-tracker.mazefunnels.io`)
@@ -15,6 +17,15 @@ services:
       - traefik.http.routers.maze-sales-tracker.tls.certresolver=letsencrypt
       - traefik.http.services.maze-sales-tracker.loadbalancer.server.port=80
 
+  # Mini-API de provisioning de miembros. Interna: solo la alcanza nginx por DNS (`api`).
+  api:
+    build: ./api
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - default
+
 networks:
   traefik-public:
     external: true
+  default:
