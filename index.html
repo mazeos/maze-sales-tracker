@@ -1009,20 +1009,21 @@ function renderTeam(){
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
     </div>` : ''}` + footer();
 }
-window.setAgName=(v)=>{ DB.team.name=(v||'Mi Agencia').trim(); save(); };
-window.setMode=(v)=>{ DB.team.mode=v; save(); };
-window.setTz=(v)=>{ DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
-window.setMemberName=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
-window.setMemberRole=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
-window.setCommission=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
+window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
+window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
+window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
+window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
+window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+window.setCommission=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
 window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
 window.addMember=()=>{
+  if(!IS_ADMIN) return;
   const name=(document.getElementById('newName').value||'').trim(); const role=document.getElementById('newRole').value;
   if(!name){ toast('Poné un nombre'); return; }
   const m={id:uid(), name, role}; if(role==='closer') m.commission=0;
   DB.members.push(m); save(); toast(name+' agregado'); renderTeam();
 };
-window.delMember=(id)=>{ if(!confirm('¿Quitar del equipo? Sus datos quedan guardados pero no se muestran.')) return; DB.members=DB.members.filter(m=>m.id!==id); save(); renderTeam(); };
+window.delMember=(id)=>{ if(!IS_ADMIN) return; if(!confirm('¿Quitar del equipo? Sus datos quedan guardados pero no se muestran.')) return; DB.members=DB.members.filter(m=>m.id!==id); save(); renderTeam(); };
 
 // ---------- Metas ----------
 function renderGoals(){
@@ -1039,7 +1040,7 @@ function renderGoals(){
       <p style="color:var(--muted);font-size:13px;margin-top:6px">El panel usa estas metas para el <b>pacing</b>: te dice si el equipo va adelantado o atrasado según cuántos días de la semana ya pasaron.</p>
     </div>` + footer();
 }
-window.setGoal=(k,v)=>{ if(!DB.goals.week) DB.goals.week={}; const n=+v||0; if(n) DB.goals.week[k]=n; else delete DB.goals.week[k]; save(); toast('Meta guardada'); };
+window.setGoal=(k,v)=>{ if(!IS_ADMIN) return; if(!DB.goals.week) DB.goals.week={}; const n=+v||0; if(n) DB.goals.week[k]=n; else delete DB.goals.week[k]; save(); toast('Meta guardada'); };
 
 // ---------- Ventas ----------
 function renderSales(){
