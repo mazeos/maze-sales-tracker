@@ -106,6 +106,7 @@
   .tag.warn{color:var(--amber);background:rgba(245,177,76,.10)}
   .tag.bad{color:var(--danger);background:rgba(242,85,90,.10)}
   .empty{color:var(--faint);font-size:12.5px;padding:6px 0}
+  .admin-lock{display:flex;gap:9px;align-items:flex-start;background:rgba(245,177,76,.10);border:1px solid rgba(245,177,76,.35);color:var(--amber);font-size:12.5px;line-height:1.45;padding:10px 13px;border-radius:11px;margin-bottom:16px}
 
   .reps{display:flex;flex-direction:column;gap:10px}
   .rep{display:grid;grid-template-columns:36px 1fr auto;gap:12px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2)}
@@ -253,6 +254,7 @@
   body[data-theme="light"] .tag.warn,
   body[data-theme="light"] .rep .kpi .n.warn{color:#7d5300}
   body[data-theme="light"] .tag.warn{background:rgba(245,177,76,.16)}
+  body[data-theme="light"] .admin-lock{color:#7d5300;background:rgba(245,177,76,.16)}
   body[data-theme="light"] .tag.bad,
   body[data-theme="light"] .rep .kpi .n.bad,
   body[data-theme="light"] .conv.bad{color:#c8353a}
@@ -967,6 +969,7 @@ window.tblEdit=(el)=>{
 // ---------- Equipo ----------
 function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=sumMember(m.id, r.start, r.end); return Math.round((m.commission||0)/100 * (s.cash_nuevo||0)); }
 function renderTeam(){
+  const ro = !IS_ADMIN;
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
     .map(([v,l])=>`<option value="${v}" ${DB.team.mode===v?'selected':''}>${l}</option>`).join('');
   const tz=(DB.team.tz)||'America/Argentina/Buenos_Aires';
@@ -975,35 +978,36 @@ function renderTeam(){
   let list='';
   DB.members.forEach(m=>{
     const line2 = m.role==='closer'
-      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)">% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
+      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)" ${ro?'disabled':''}>% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
       : '';
     list+=`<div class="cfg-member">
       <div class="cfg-line1">
-        <input class="inp cfg-name" value="${esc(m.name)}" onchange="setMemberName('${m.id}',this.value)" data-tip="Nombre de la persona. Se actualiza en todo el panel.">
-        <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga.">${roleOpts(m.role)}</select>
+        <input class="inp cfg-name" value="${esc(m.name)}" onchange="setMemberName('${m.id}',this.value)" data-tip="Nombre de la persona. Se actualiza en todo el panel." ${ro?'disabled':''}>
+        <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga." ${ro?'disabled':''}>${roleOpts(m.role)}</select>
         <span class="cfg-spacer"></span>
-        <button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>
-        <button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>
+        ${(IS_ADMIN || (ME && m.id===ME.id)) ? `<button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>` : ''}
+        ${IS_ADMIN ? `<button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>` : ''}
       </div>${line2}
     </div>`;
   });
   if(!DB.members.length) list=`<div class="empty">Sin miembros todavía.</div>`;
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
+    ${adminNotice()}
     <div class="section"><div class="eyebrow">Agencia</div>
       <div class="grid2">
-        <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)"></div>
-        <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)">${modeOpts}</select></div>
-        <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)">${tzOpts}</select></div>
+        <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)" ${ro?'disabled':''}>${modeOpts}</select></div>
+        <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)" ${ro?'disabled':''}>${tzOpts}</select></div>
       </div>
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
-    <div class="section"><div class="eyebrow">Agregar miembro</div>
+    ${IS_ADMIN ? `<div class="section"><div class="eyebrow">Agregar miembro</div>
       <div class="grid2">
         <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
         <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
-    </div>` + footer();
+    </div>` : ''}` + footer();
 }
 window.setAgName=(v)=>{ DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ DB.team.mode=v; save(); };
@@ -1023,12 +1027,14 @@ window.delMember=(id)=>{ if(!confirm('¿Quitar del equipo? Sus datos quedan guar
 // ---------- Metas ----------
 function renderGoals(){
   const g=DB.goals.week||{};
+  const ro=!IS_ADMIN;
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Metas</div><h2 class="view">Objetivos semanales del equipo</h2>
+    ${adminNotice()}
     <div class="cap-wrap">
       <div class="grid2">
-        <div class="field"><label>Cierres / semana</label><input class="inp" type="number" min="0" value="${g.cierres||''}" onchange="setGoal('cierres',this.value)"></div>
-        <div class="field"><label>Cash collected / semana ($)</label><input class="inp" type="number" min="0" value="${g.cash_nuevo||''}" onchange="setGoal('cash_nuevo',this.value)"></div>
-        <div class="field"><label>Agendados / semana</label><input class="inp" type="number" min="0" value="${g.agendados||''}" onchange="setGoal('agendados',this.value)"></div>
+        <div class="field"><label>Cierres / semana</label><input class="inp" type="number" min="0" value="${g.cierres||''}" onchange="setGoal('cierres',this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Cash collected / semana ($)</label><input class="inp" type="number" min="0" value="${g.cash_nuevo||''}" onchange="setGoal('cash_nuevo',this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Agendados / semana</label><input class="inp" type="number" min="0" value="${g.agendados||''}" onchange="setGoal('agendados',this.value)" ${ro?'disabled':''}></div>
       </div>
       <p style="color:var(--muted);font-size:13px;margin-top:6px">El panel usa estas metas para el <b>pacing</b>: te dice si el equipo va adelantado o atrasado según cuántos días de la semana ya pasaron.</p>
     </div>` + footer();
@@ -1086,6 +1092,7 @@ window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq(
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function info(tip){ return `<span class="info" data-tip="${esc(tip)}">i</span>`; }
+function adminNotice(){ return IS_ADMIN ? '' : '<div class="admin-lock">🔒 <span>Solo el admin puede editar esta sección. Puedes ver los datos del equipo, pero no modificarlos.</span></div>'; }
 function footer(){ return `<div class="footnote">
   <span>Maze Sales Tracker IA · v1 funcional</span><span class="dot2"></span>
   <span>Datos guardados en este navegador</span><span class="dot2"></span>
