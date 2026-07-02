@@ -421,7 +421,7 @@ async function loadFromSupabase(){
   const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz},
-      members:profs.filter(p=>p.role!=='admin').sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
+      members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
       entries:{}, goals:{week:(goalRow&&goalRow.goals)||{}},
       sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente}))};
   ents.forEach(e=>{ DB.entries[e.member_id+'|'+e.entry_date]=e.metrics||{}; });
@@ -1005,6 +1005,8 @@ function renderTeam(){
       <div class="grid2">
         <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
         <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
+        <div class="field"><label>Email</label><input class="inp" id="newEmail" type="email" placeholder="persona@email.com"></div>
+        <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
     </div>` : ''}` + footer();
@@ -1016,14 +1018,39 @@ window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>
 window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
 window.setCommission=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
 window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
-window.addMember=()=>{
+window.addMember=async ()=>{
   if(!IS_ADMIN) return;
-  const name=(document.getElementById('newName').value||'').trim(); const role=document.getElementById('newRole').value;
-  if(!name){ toast('Poné un nombre'); return; }
-  const m={id:uid(), name, role}; if(role==='closer') m.commission=0;
-  DB.members.push(m); save(); toast(name+' agregado'); renderTeam();
+  const name=(document.getElementById('newName').value||'').trim();
+  const role=document.getElementById('newRole').value;
+  const email=(document.getElementById('newEmail').value||'').trim();
+  const password=document.getElementById('newPass').value||'';
+  if(!name){ toast('Tienes que poner un nombre'); return; }
+  if(!email){ toast('Tienes que poner un email'); return; }
+  if(!password){ toast('Tienes que poner una contraseña'); return; }
+  if(password.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({name, role, email, password})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast(name+' agregado al equipo'); await loadFromSupabase(); renderTeam(); }
+  else{ toast(data.error || 'No se pudo agregar'); }
 };
-window.delMember=(id)=>{ if(!IS_ADMIN) return; if(!confirm('¿Quitar del equipo? Sus datos quedan guardados pero no se muestran.')) return; DB.members=DB.members.filter(m=>m.id!==id); save(); renderTeam(); };
+window.delMember=async (id)=>{
+  if(!IS_ADMIN) return;
+  if(!confirm('¿Dar de baja a esta persona? Sus datos históricos se conservan, pero ya no va a poder entrar a la app.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/members/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast('Miembro dado de baja'); await loadFromSupabase(); renderTeam(); }
+  else{ toast(data.error || 'No se pudo dar de baja'); }
+};
 
 // ---------- Metas ----------
 function renderGoals(){

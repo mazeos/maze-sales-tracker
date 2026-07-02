@@ -121,9 +121,9 @@ async function createMember(req, res, admin) {
   const password = typeof body.password === 'string' ? body.password : '';
 
   // Validaciones (mensajes en español latino, tuteo).
-  if (!name) return sendJSON(res, 400, { error: 'Tenés que poner un nombre' });
-  if (!email) return sendJSON(res, 400, { error: 'Tenés que poner un email' });
-  if (!password) return sendJSON(res, 400, { error: 'Tenés que poner una contraseña' });
+  if (!name) return sendJSON(res, 400, { error: 'Tienes que poner un nombre' });
+  if (!email) return sendJSON(res, 400, { error: 'Tienes que poner un email' });
+  if (!password) return sendJSON(res, 400, { error: 'Tienes que poner una contraseña' });
   if (password.length < 8) return sendJSON(res, 400, { error: 'La contraseña tiene que tener al menos 8 caracteres' });
   if (!VALID_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage o closer' });
 
@@ -147,7 +147,7 @@ async function createMember(req, res, admin) {
   }
   if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
     console.log(`[api] POST /api/members admin=${admin.uid} auth_fail status=${authRes.status} -> 500`);
-    return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Intentá de nuevo.' });
+    return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
   }
 
   const newUid = authUser.id;
