@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-02 - Completed quick task 260702-nhd: Gating admin-only en UI de Configuraciones y Metas
+Last activity: 2026-07-02 - Completed quick task 260702-onz: Mini-API de provisioning de miembros (alta/baja server-side)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -62,6 +62,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260702-nhd | Gating admin-only en UI de Configuraciones y Metas | 2026-07-02 | e94bf33 | [260702-nhd-gating-admin-only-en-ui-de-configuracion](./quick/260702-nhd-gating-admin-only-en-ui-de-configuracion/) |
+| 260702-onz | Mini-API de provisioning de miembros (alta/baja server-side) | 2026-07-02 | 147f6de | [260702-onz-mini-api-de-provisioning-de-miembros-alt](./quick/260702-onz-mini-api-de-provisioning-de-miembros-alt/) |
 
 ## Deferred Items
 
