@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-04 - Completed quick task 260704-p9c: Integración GHL Fase 1 — Conexión OAuth de subcuenta desde Configuraciones
+Last activity: 2026-07-04 - Completed quick task 260704-r0e: Fase 2 carcasa GHL — Usuarios desde HighLevel
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -64,6 +64,7 @@ None yet.
 | 260702-nhd | Gating admin-only en UI de Configuraciones y Metas | 2026-07-02 | e94bf33 | [260702-nhd-gating-admin-only-en-ui-de-configuracion](./quick/260702-nhd-gating-admin-only-en-ui-de-configuracion/) |
 | 260702-onz | Mini-API de provisioning de miembros (alta/baja server-side) | 2026-07-02 | 147f6de | [260702-onz-mini-api-de-provisioning-de-miembros-alt](./quick/260702-onz-mini-api-de-provisioning-de-miembros-alt/) |
 | 260704-p9c | Integración GHL Fase 1 — Conexión OAuth de subcuenta desde Configuraciones | 2026-07-04 | 06ff588 | [260704-p9c-integraci-n-ghl-fase-1-conexi-n-oauth-de](./quick/260704-p9c-integraci-n-ghl-fase-1-conexi-n-oauth-de/) |
+| 260704-r0e | Fase 2 carcasa GHL — Usuarios desde HighLevel (import + código de acceso + sync) | 2026-07-04 | (merge) | [260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle](./quick/260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle/) |
 
 ## Deferred Items
 
