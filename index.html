@@ -180,6 +180,16 @@
   .pill.triage{background:rgba(245,177,76,.14);color:var(--amber)}
   .pill.closer{background:rgba(197,255,73,.14);color:var(--lime-ink)}
 
+  /* chips de estado — Equipo desde HighLevel */
+  .pill.st-nuevo{background:rgba(108,92,231,.16);color:#a99bff}
+  .pill.st-vinculable{background:rgba(245,177,76,.14);color:var(--amber)}
+  .pill.st-importado{background:rgba(197,255,73,.14);color:var(--lime-ink)}
+  .pill.st-inactivo{background:rgba(139,139,153,.16);color:var(--muted)}
+  .ghl-code{display:flex;align-items:center;justify-content:space-between;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;flex-wrap:wrap}
+  .ghl-code-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:17px;letter-spacing:.03em;color:var(--lime-ink)}
+  .ghl-code-txt{color:var(--muted);font-size:12.5px;margin-top:5px;max-width:520px}
+  .ghl-ok{color:var(--lime-ink);font-weight:700;font-size:15px}
+
   .section{margin-bottom:22px}
   .section .eyebrow{margin-bottom:12px}
   .cards-mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
@@ -248,7 +258,9 @@
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
   /* contraste de roles/tags en claro */
   body[data-theme="light"] .pill.setter,
+  body[data-theme="light"] .pill.st-nuevo,
   body[data-theme="light"] .rep.setter .rav{color:#5b45d6;background:rgba(108,92,231,.12)}
+  body[data-theme="light"] .pill.st-vinculable{color:#7d5300;background:rgba(245,177,76,.16)}
   body[data-theme="light"] .pill.triage,
   body[data-theme="light"] .rep.triage .rav,
   body[data-theme="light"] .tag.warn,
@@ -329,6 +341,7 @@
     <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="spacer"></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
+    <div class="nav-i" data-action="password" title="Cambiar mi contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg><span class="tt">Cambiar mi contraseña</span></div>
     <div class="nav-i" data-action="logout" title="Cerrar sesión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg><span class="tt">Cerrar sesión</span></div>
     <div class="avatar" title="Owner">A</div>
   </nav>
@@ -547,6 +560,7 @@ function go(view){ state.view=view; render(); }
 document.querySelectorAll('.nav-i').forEach(el=>{
   el.addEventListener('click',()=>{
     if(el.dataset.action==='theme'){ toggleTheme(); return; }
+    if(el.dataset.action==='password'){ openPasswordModal(); return; }
     if(el.dataset.action==='logout'){ if(confirm('¿Cerrar sesión?')) doLogout(); return; }
     go(el.dataset.view);
   });
@@ -1018,8 +1032,178 @@ window.disconnectGhl=async ()=>{
     res=await fetch('/api/integrations/ghl',{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
     data=await res.json().catch(()=>({}));
   }catch(e){ toast('No se pudo conectar con el servidor'); return; }
-  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; renderTeam(); }
+  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_USERS=null; GHL_REMOVED=[]; renderTeam(); }
   else{ toast(data.error || 'No se pudo desconectar'); }
+};
+
+// ---------- Equipo desde HighLevel (Fase 2) ----------
+// Lista de usuarios de la subcuenta GHL (null = todavía no se cargó) + bajas
+// automáticas de la última reconciliación. Solo visible para el admin con org conectada.
+let GHL_USERS=null, GHL_USERS_LOADING=false, GHL_REMOVED=[];
+const GHL_STATUS_CHIP={nuevo:['Nuevo','st-nuevo'],vinculable:['Vinculable','st-vinculable'],importado:['Importado','st-importado'],inactivo:['Inactivo','st-inactivo']};
+const GHL_STATUS_ACTION={nuevo:'Importar',vinculable:'Vincular',inactivo:'Reactivar'};
+function ghlTeamCard(){
+  if(!IS_ADMIN || !GHL_STATUS || !GHL_STATUS.connected) return '';
+  // (a) Código de acceso del equipo = Location ID (contraseña inicial).
+  const codeBox=`<div class="ghl-code">
+    <div>
+      <div class="ghl-code-val">${esc(GHL_STATUS.location_id||'')}</div>
+      <p class="ghl-code-txt">Cada miembro entra con su email de HighLevel y este código como contraseña inicial. Después puede cambiarla desde la app.</p>
+    </div>
+    <button class="btn ghost sm" onclick="copyGhlAccessCode()">Copiar</button>
+  </div>`;
+  // (c) Aviso de bajas automáticas (GHL manda).
+  let removedBox='';
+  if(GHL_REMOVED.length){
+    const n=GHL_REMOVED.length;
+    removedBox=`<div class="admin-lock">⚠️ <span>Se ${n===1?'dio de baja 1 miembro que ya no está':'dieron de baja '+n+' miembros que ya no están'} en HighLevel: <b>${GHL_REMOVED.map(x=>esc(x)).join(', ')}</b></span></div>`;
+  }
+  // (b) Botón de carga / tabla de usuarios GHL.
+  const loadBtn=(cls)=>`<button class="btn ${cls}" onclick="loadGhlUsers()" ${GHL_USERS_LOADING?'disabled':''}>${GHL_USERS_LOADING?'Cargando…':(GHL_USERS===null?'Cargar usuarios de HighLevel':'Actualizar lista')}</button>`;
+  let listBox='';
+  if(GHL_USERS===null){
+    listBox=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Traé los usuarios de tu subcuenta y elegí a quiénes importar como miembros del tracker, con el rol que les corresponda.</p>${loadBtn('')}`;
+  } else if(!GHL_USERS.length){
+    listBox=`<div class="empty">Tu subcuenta de HighLevel no tiene usuarios.</div><div style="margin-top:10px">${loadBtn('ghost sm')}</div>`;
+  } else {
+    const roleOpt=(r)=>r==='admin'?'Admin':ROLE_LABEL[r];
+    const rows=GHL_USERS.map(u=>{
+      const [chipLbl,chipCls]=GHL_STATUS_CHIP[u.status]||[u.status,''];
+      const roleSel=u.status==='importado'?'':`<select class="inp cfg-role" id="ghlrole_${esc(u.ghl_user_id)}">${['setter','triage','closer','admin'].map(r=>`<option value="${r}" ${r==='setter'?'selected':''}>${roleOpt(r)}</option>`).join('')}</select>`;
+      const action=u.status==='importado'
+        ? `<span class="ghl-ok" data-tip="Ya es miembro del tracker">✓</span>`
+        : `<button class="btn sm" onclick="importGhlUser('${esc(u.ghl_user_id)}')">${GHL_STATUS_ACTION[u.status]||'Importar'}</button>`;
+      return `<tr>
+        <td style="text-align:left">${esc(u.name||'—')}</td>
+        <td style="text-align:left">${esc(u.email||'—')}</td>
+        <td style="text-align:left"><span class="pill ${chipCls}">${esc(chipLbl)}</span></td>
+        <td style="text-align:left">${roleSel}</td>
+        <td>${action}</td>
+      </tr>`;
+    }).join('');
+    listBox=`<div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Nombre</th><th style="text-align:left">Email</th><th style="text-align:left">Estado</th><th style="text-align:left">Rol en el tracker</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div style="margin-top:10px">${loadBtn('ghost sm')}</div>`;
+  }
+  return `<div class="section"><div class="eyebrow">Equipo desde HighLevel</div>${codeBox}${removedBox}${listBox}</div>`;
+}
+window.copyGhlAccessCode=async ()=>{
+  const code=(GHL_STATUS&&GHL_STATUS.location_id)||'';
+  if(!code) return;
+  try{
+    await navigator.clipboard.writeText(code);
+  }catch(e){
+    // Fallback para contextos sin Clipboard API (http, browsers viejos).
+    const ta=document.createElement('textarea');
+    ta.value=code; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(err){}
+    document.body.removeChild(ta);
+  }
+  toast('Código copiado');
+};
+window.loadGhlUsers=async ()=>{
+  if(!IS_ADMIN || GHL_USERS_LOADING) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  GHL_USERS_LOADING=true;
+  if(state.view==='team') renderTeam();
+  let res, data;
+  try{
+    res=await fetch('/api/ghl/users',{headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    GHL_USERS_LOADING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='team') renderTeam();
+    return;
+  }
+  GHL_USERS_LOADING=false;
+  if(res.ok){
+    GHL_USERS=data.users||[];
+    GHL_REMOVED=data.removed||[];
+    // Las bajas automáticas cambian el equipo local: recargar miembros.
+    if(GHL_REMOVED.length) await loadFromSupabase();
+  } else {
+    toast(data.error || 'No se pudo cargar la lista de HighLevel');
+  }
+  if(state.view==='team') renderTeam();
+};
+window.importGhlUser=async (ghlUserId)=>{
+  if(!IS_ADMIN) return;
+  const sel=document.getElementById('ghlrole_'+ghlUserId);
+  const role=(sel&&sel.value)||'setter';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/ghl/users/import',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({ghl_user_id:ghlUserId, role})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    toast(data.reactivated?'Reactivado':(data.linked?'Vinculado':'Importado'));
+    await loadFromSupabase();   // refresca el equipo local
+    await loadGhlUsers();       // refresca los estados de la tabla
+  } else {
+    toast(data.error || 'No se pudo importar');
+  }
+};
+
+// ---------- Cambiar mi contraseña (cualquier usuario logueado) ----------
+// Modal lazy con el patrón del drill-overlay: fondo oscuro, card centrada,
+// click afuera o ✕ cierran. El cambio real lo hace la mini-API (/api/me/password).
+function openPasswordModal(){
+  let ov=document.getElementById('pwOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='pwOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closePasswordModal(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closePasswordModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Tu cuenta</div><h3>Cambiar mi contraseña</h3></div></div>
+    <p class="drill-def">Mínimo 8 caracteres. La vas a usar la próxima vez que entres.</p>
+    <form onsubmit="return submitPassword(event)">
+      <input class="inp" id="pw_new" type="password" placeholder="Nueva contraseña" autocomplete="new-password" required style="margin:8px 0 10px">
+      <input class="inp" id="pw_conf" type="password" placeholder="Repetir contraseña" autocomplete="new-password" required style="margin-bottom:16px">
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closePasswordModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="pw_btn">Guardar</button>
+      </div>
+    </form>
+  </div>`;
+  ov.style.display='flex';
+  const inp=document.getElementById('pw_new'); if(inp) inp.focus();
+}
+function closePasswordModal(){ const ov=document.getElementById('pwOv'); if(ov) ov.style.display='none'; }
+window.openPasswordModal=openPasswordModal;
+window.closePasswordModal=closePasswordModal;
+window.submitPassword=async (ev)=>{
+  ev.preventDefault();
+  const pass=document.getElementById('pw_new').value;
+  const conf=document.getElementById('pw_conf').value;
+  if(pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return false; }
+  if(pass!==conf){ toast('Las contraseñas no coinciden'); return false; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return false; }
+  const btn=document.getElementById('pw_btn');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  let res, data;
+  try{
+    res=await fetch('/api/me/password',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({password:pass})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast('No se pudo conectar con el servidor');
+    return false;
+  }
+  if(res.ok){ toast('Contraseña actualizada'); closePasswordModal(); }
+  else{
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast(data.error || 'No se pudo cambiar la contraseña');
+  }
+  return false;
 };
 function renderTeam(){
   const ro = !IS_ADMIN;
@@ -1063,7 +1247,7 @@ function renderTeam(){
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
     </div>` : ''}
-    ${ghlCard()}` + footer();
+    ${ghlCard()}${ghlTeamCard()}` + footer();
 }
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };

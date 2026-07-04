@@ -11,6 +11,9 @@
 //   GET    /api/oauth/callback     -> recibe el code de GHL, intercambia tokens y guarda la integración
 //   GET    /api/integrations/ghl   -> estado de conexión (sin tokens, jamás)
 //   DELETE /api/integrations/ghl   -> desconecta la integración GHL de la org
+//   GET    /api/ghl/users          -> lista los usuarios de la subcuenta GHL con su estado + reconcilia bajas
+//   POST   /api/ghl/users/import   -> importa/vincula/reactiva un usuario GHL como miembro del tracker
+//   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -81,11 +84,12 @@ function svcHeaders(extra = {}) {
   };
 }
 
-// ---------- Auth: valida un JWT y exige role=admin ----------
-// checkAdminToken recibe el token ('Bearer xxx' o el token pelado) y devuelve
-// { ok:true, uid, org_id } si el caller es admin; si no, { ok:false, status, error }.
+// ---------- Auth: valida un JWT (y opcionalmente exige role=admin) ----------
+// checkUserToken recibe el token ('Bearer xxx' o el token pelado), lo valida contra
+// GoTrue y devuelve { ok:true, uid } SIN exigir rol; si no, { ok:false, status, error }.
+// checkAdminToken lo reutiliza y agrega el paso 2: perfil real + role=admin.
 // requireAdmin(req) es el wrapper que lee el header Authorization.
-async function checkAdminToken(bearerToken) {
+async function checkUserToken(bearerToken) {
   let token = (bearerToken || '').trim();
   if (token.toLowerCase().startsWith('bearer ')) token = token.slice(7).trim();
   if (!token) {
@@ -93,7 +97,7 @@ async function checkAdminToken(bearerToken) {
   }
   const authHeader = 'Bearer ' + token;
 
-  // 1. Validar el JWT contra GoTrue (no confiamos en claims del cliente).
+  // Validar el JWT contra GoTrue (no confiamos en claims del cliente).
   let userRes;
   try {
     userRes = await fetch(SUPABASE_URL + '/auth/v1/user', {
@@ -110,6 +114,15 @@ async function checkAdminToken(bearerToken) {
   if (!uid) {
     return { ok: false, status: 401, error: 'Sesión inválida' };
   }
+
+  return { ok: true, uid };
+}
+
+async function checkAdminToken(bearerToken) {
+  // 1. Validar el JWT (mismo paso que cualquier usuario logueado).
+  const usr = await checkUserToken(bearerToken);
+  if (!usr.ok) return usr;
+  const uid = usr.uid;
 
   // 2. Leer el perfil real del caller con la service key y exigir role=admin.
   let profRes;
@@ -168,6 +181,23 @@ function verifyState(state) {
     return { ok: true, org: data.org };
   } catch {
     return { ok: false };
+  }
+}
+
+// Trae la fila completa de st_integrations de una org (solo server-side: incluye
+// tokens, JAMÁS pasar esta fila al browser). Devuelve la fila o null (también
+// null en error de red: el caller decide cómo responder).
+async function getIntegration(orgId) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(orgId) + '&select=*',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return null;
+    const rows = await r.json().catch(() => null);
+    return Array.isArray(rows) ? (rows[0] || null) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -498,6 +528,321 @@ async function disconnectGhl(req, res, admin) {
   return sendJSON(res, 200, { ok: true });
 }
 
+// ---------- Helpers de usuarios GHL ----------
+// Trae la lista de usuarios de la subcuenta GHL con un access_token vigente.
+// Excluye los deleted (a efectos de status Y de reconciliación cuentan como
+// "no están en GHL"). Lanza Error si no se pudo hablar con HighLevel.
+async function fetchGhlUsers(integration) {
+  const token = await refreshGhlToken(integration); // lanza si el refresh falla
+  const r = await fetch(
+    'https://services.leadconnectorhq.com/users/?locationId=' + encodeURIComponent(integration.location_id),
+    { headers: { 'Authorization': 'Bearer ' + token, 'Version': '2021-07-28' } }
+  );
+  if (r.status < 200 || r.status >= 300) {
+    console.error(`[api] fetchGhlUsers org=${integration.org_id} fail status=${r.status}`);
+    throw new Error('No se pudo hablar con HighLevel');
+  }
+  const body = await r.json().catch(() => ({}));
+  const all = Array.isArray(body && body.users) ? body.users : [];
+  return all.filter((u) => u && u.id && u.deleted !== true);
+}
+
+// Email de un auth user vía GoTrue admin, normalizado (lowercase + trim) y
+// cacheado por request (Map uid -> email|null). Equipos chicos: pocas llamadas.
+async function getAuthEmail(uid, cache) {
+  if (cache.has(uid)) return cache.get(uid);
+  let email = null;
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+      headers: svcHeaders(),
+    });
+    if (r.status >= 200 && r.status < 300) {
+      const u = await r.json().catch(() => null);
+      if (u && typeof u.email === 'string') email = u.email.toLowerCase().trim();
+    }
+  } catch { /* best-effort: sin email no hay match posible */ }
+  cache.set(uid, email);
+  return email;
+}
+
+// Nombre legible de un usuario GHL (name, o firstName + lastName).
+function ghlUserName(u) {
+  return u.name || [u.firstName, u.lastName].filter(Boolean).join(' ');
+}
+
+// ---------- GET /api/ghl/users ----------
+// Lista los usuarios de la subcuenta GHL de la org con su estado respecto del
+// tracker (nuevo / vinculable / importado / inactivo) y reconcilia: GHL es la
+// última palabra — un perfil importado cuyo usuario ya no está en la subcuenta
+// se da de baja automáticamente (active=false + ban).
+async function listGhlUsers(req, res, admin) {
+  const integration = await getIntegration(admin.org_id);
+  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+
+  let ghlUsers;
+  try {
+    ghlUsers = await fetchGhlUsers(integration);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  // Perfiles de la org (filtrado manual por org_id: la service key bypassea RLS).
+  let profs;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(admin.org_id)
+        + '&select=id,name,role,active,ghl_user_id',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los perfiles del equipo' });
+    profs = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer los perfiles del equipo' });
+  }
+  if (!Array.isArray(profs)) profs = [];
+
+  // Emails SOLO de los perfiles sin ghl_user_id (para detectar "vinculable").
+  const emailCache = new Map();
+  const emailToProfile = new Map();
+  for (const p of profs) {
+    if (p.ghl_user_id) continue;
+    const email = await getAuthEmail(p.id, emailCache);
+    if (email && !emailToProfile.has(email)) emailToProfile.set(email, p);
+  }
+
+  const byGhlId = new Map();
+  for (const p of profs) { if (p.ghl_user_id) byGhlId.set(p.ghl_user_id, p); }
+
+  // Estado de cada usuario GHL respecto del tracker.
+  const users = ghlUsers.map((u) => {
+    const email = typeof u.email === 'string' ? u.email.toLowerCase().trim() : null;
+    const linked = byGhlId.get(u.id);
+    let status = 'nuevo';
+    if (linked) status = linked.active === false ? 'inactivo' : 'importado';
+    else if (email && emailToProfile.has(email)) status = 'vinculable';
+    return {
+      ghl_user_id: u.id,
+      name: ghlUserName(u),
+      email: u.email || null,
+      ghl_role: (u.roles && u.roles.role) || null,
+      status,
+    };
+  });
+
+  // Reconciliación — GHL manda (D-04): perfiles importados activos cuyo usuario
+  // ya no está en la subcuenta (o figura deleted) → baja automática.
+  const ghlIds = new Set(ghlUsers.map((u) => u.id));
+  const removed = [];
+  for (const p of profs) {
+    if (!p.ghl_user_id || p.active === false || ghlIds.has(p.ghl_user_id)) continue;
+    try {
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
+        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
+      );
+      if (patchRes.status < 200 || patchRes.status >= 300) {
+        console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fail id=${p.id} status=${patchRes.status}`);
+        continue;
+      }
+    } catch {
+      console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fetch_fail id=${p.id}`);
+      continue;
+    }
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(p.id), {
+        method: 'PUT',
+        headers: svcHeaders(),
+        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
+      });
+    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
+    console.log(`[api] GET /api/ghl/users org=${admin.org_id} baja_auto id=${p.id} name=${p.name} (ya no está en GHL)`);
+    removed.push(p.name);
+  }
+
+  console.log(`[api] GET /api/ghl/users admin=${admin.uid} users=${users.length} removed=${removed.length} -> 200`);
+  // access_code = Location ID (D-03: contraseña inicial del equipo). NUNCA tokens.
+  return sendJSON(res, 200, { access_code: integration.location_id, users, removed });
+}
+
+// ---------- POST /api/ghl/users/import ----------
+// Importa un usuario de la subcuenta GHL como miembro del tracker. NUNCA confía
+// en name/email del body: re-consulta la lista GHL server-side y toma los datos
+// reales de ahí. Según el caso: reactiva, vincula o crea.
+const GHL_IMPORT_ROLES = ['setter', 'triage', 'closer', 'admin'];
+async function importGhlUser(req, res, admin) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const body = parsed.data || {};
+  const ghlUserId = typeof body.ghl_user_id === 'string' ? body.ghl_user_id.trim() : '';
+  const role = typeof body.role === 'string' ? body.role.trim() : '';
+  if (!ghlUserId) return sendJSON(res, 400, { error: 'Falta el usuario de HighLevel a importar' });
+  // Acá 'admin' SÍ es un rol válido (distinto de /api/members): se puede importar un admin.
+  if (!GHL_IMPORT_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage, closer o admin' });
+
+  const integration = await getIntegration(admin.org_id);
+  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+
+  let ghlUsers;
+  try {
+    ghlUsers = await fetchGhlUsers(integration);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  const ghlUser = ghlUsers.find((u) => u.id === ghlUserId);
+  if (!ghlUser) return sendJSON(res, 404, { error: 'Ese usuario ya no está en HighLevel' });
+  const name = ghlUserName(ghlUser);
+  const email = typeof ghlUser.email === 'string' ? ghlUser.email.trim() : '';
+  if (!email) return sendJSON(res, 400, { error: 'Ese usuario no tiene email en HighLevel' });
+
+  // Perfiles de la org (para decidir: reactivar / vincular / crear).
+  let profs;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(admin.org_id)
+        + '&select=id,name,role,active,ghl_user_id',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los perfiles del equipo' });
+    profs = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer los perfiles del equipo' });
+  }
+  if (!Array.isArray(profs)) profs = [];
+
+  // a. Ya existe un perfil de la org con ese ghl_user_id.
+  const existing = profs.find((p) => p.ghl_user_id === ghlUserId);
+  if (existing && existing.active !== false) {
+    return sendJSON(res, 409, { error: 'Ya está importado' });
+  }
+  if (existing) {
+    // Reactivar: active=true + unban del auth user.
+    try {
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(existing.id),
+        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: true }) }
+      );
+      if (patchRes.status < 200 || patchRes.status >= 300) {
+        return sendJSON(res, 500, { error: 'No se pudo reactivar al miembro' });
+      }
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo reactivar al miembro' });
+    }
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(existing.id), {
+        method: 'PUT',
+        headers: svcHeaders(),
+        body: JSON.stringify({ ban_duration: 'none' }),
+      });
+    } catch { /* best-effort unban */ }
+    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} reactivated id=${existing.id} ghl=${ghlUserId} -> 200`);
+    return sendJSON(res, 200, { ok: true, reactivated: true });
+  }
+
+  // b. Perfil manual (sin ghl_user_id) con el mismo email → vincular sin tocar
+  //    su contraseña ni el auth user: solo se agrega el ghl_user_id.
+  const emailCache = new Map();
+  const emailLower = email.toLowerCase();
+  for (const p of profs) {
+    if (p.ghl_user_id) continue;
+    const pEmail = await getAuthEmail(p.id, emailCache);
+    if (pEmail && pEmail === emailLower) {
+      try {
+        const patchRes = await fetch(
+          SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
+          { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ ghl_user_id: ghlUserId }) }
+        );
+        if (patchRes.status < 200 || patchRes.status >= 300) {
+          return sendJSON(res, 500, { error: 'No se pudo vincular al miembro' });
+        }
+      } catch {
+        return sendJSON(res, 502, { error: 'No se pudo vincular al miembro' });
+      }
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} linked id=${p.id} ghl=${ghlUserId} -> 200`);
+      return sendJSON(res, 200, { ok: true, linked: true });
+    }
+  }
+
+  // c. Crear: auth user con el Location ID como contraseña inicial (D-03).
+  let authRes, authUser;
+  try {
+    authRes = await fetch(SUPABASE_URL + '/auth/v1/admin/users', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: JSON.stringify({ email, password: integration.location_id, email_confirm: true }),
+    });
+    authUser = await authRes.json().catch(() => ({}));
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo crear el usuario en el servidor de auth' });
+  }
+  if (authRes.status === 422 || authRes.status === 409 ||
+      (authUser && /already|registered|exists|duplicate/i.test(JSON.stringify(authUser)))) {
+    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup -> 409`);
+    return sendJSON(res, 409, { error: 'Ese email ya tiene cuenta en otra organización' });
+  }
+  if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
+    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} auth_fail status=${authRes.status} -> 500`);
+    return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
+  }
+  const newUid = authUser.id;
+
+  // Insertar el perfil, con el mismo rollback que createMember si falla.
+  let profRes, profRows;
+  try {
+    profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'return=representation' }),
+      body: JSON.stringify({ id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+    });
+    profRows = await profRes.json().catch(() => null);
+  } catch {
+    profRes = { status: 500 };
+  }
+  if (profRes.status < 200 || profRes.status >= 300) {
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(newUid), {
+        method: 'DELETE',
+        headers: svcHeaders(),
+      });
+    } catch { /* best-effort rollback */ }
+    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} profile_fail rollback uid=${newUid} -> 500`);
+    return sendJSON(res, 500, { error: 'No se pudo guardar el perfil del miembro. No se creó nada.' });
+  }
+
+  const created = Array.isArray(profRows) ? profRows[0] : profRows;
+  console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} created uid=${newUid} role=${role} ghl=${ghlUserId} -> 200`);
+  return sendJSON(res, 200, created || { id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0, active: true });
+}
+
+// ---------- POST /api/me/password ----------
+// Cualquier usuario logueado cambia SU propia contraseña. El uid sale del JWT
+// validado, jamás del body (nadie puede cambiar la contraseña de otro). Se hace
+// server-side para no depender del flujo de re-auth del cliente.
+async function changeMyPassword(req, res, usr) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const body = parsed.data || {};
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (password.length < 8) return sendJSON(res, 400, { error: 'La contraseña tiene que tener al menos 8 caracteres' });
+
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(usr.uid), {
+      method: 'PUT',
+      headers: svcHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    if (r.status < 200 || r.status >= 300) {
+      console.log(`[api] POST /api/me/password uid=${usr.uid} fail status=${r.status} -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo cambiar la contraseña. Inténtalo de nuevo.' });
+    }
+  } catch {
+    return sendJSON(res, 500, { error: 'No se pudo cambiar la contraseña. Inténtalo de nuevo.' });
+  }
+
+  console.log(`[api] POST /api/me/password uid=${usr.uid} -> 200`);
+  return sendJSON(res, 200, { ok: true });
+}
+
 // ---------- Router ----------
 const server = http.createServer(async (req, res) => {
   try {
@@ -522,6 +867,24 @@ const server = http.createServer(async (req, res) => {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
       return req.method === 'GET' ? getGhlStatus(req, res, admin) : disconnectGhl(req, res, admin);
+    }
+
+    if (req.method === 'GET' && path === '/api/ghl/users') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return listGhlUsers(req, res, admin);
+    }
+
+    if (req.method === 'POST' && path === '/api/ghl/users/import') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return importGhlUser(req, res, admin);
+    }
+
+    if (req.method === 'POST' && path === '/api/me/password') {
+      const usr = await checkUserToken(req.headers['authorization'] || '');
+      if (!usr.ok) return sendJSON(res, usr.status, { error: usr.error });
+      return changeMyPassword(req, res, usr);
     }
 
     // Todo lo demás bajo /api/members exige admin.
