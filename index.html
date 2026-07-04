@@ -341,6 +341,7 @@
     <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="spacer"></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
+    <div class="nav-i" data-action="password" title="Cambiar mi contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg><span class="tt">Cambiar mi contraseña</span></div>
     <div class="nav-i" data-action="logout" title="Cerrar sesión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg><span class="tt">Cerrar sesión</span></div>
     <div class="avatar" title="Owner">A</div>
   </nav>
@@ -559,6 +560,7 @@ function go(view){ state.view=view; render(); }
 document.querySelectorAll('.nav-i').forEach(el=>{
   el.addEventListener('click',()=>{
     if(el.dataset.action==='theme'){ toggleTheme(); return; }
+    if(el.dataset.action==='password'){ openPasswordModal(); return; }
     if(el.dataset.action==='logout'){ if(confirm('¿Cerrar sesión?')) doLogout(); return; }
     go(el.dataset.view);
   });
@@ -1146,6 +1148,62 @@ window.importGhlUser=async (ghlUserId)=>{
   } else {
     toast(data.error || 'No se pudo importar');
   }
+};
+
+// ---------- Cambiar mi contraseña (cualquier usuario logueado) ----------
+// Modal lazy con el patrón del drill-overlay: fondo oscuro, card centrada,
+// click afuera o ✕ cierran. El cambio real lo hace la mini-API (/api/me/password).
+function openPasswordModal(){
+  let ov=document.getElementById('pwOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='pwOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closePasswordModal(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closePasswordModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Tu cuenta</div><h3>Cambiar mi contraseña</h3></div></div>
+    <p class="drill-def">Mínimo 8 caracteres. La vas a usar la próxima vez que entres.</p>
+    <form onsubmit="return submitPassword(event)">
+      <input class="inp" id="pw_new" type="password" placeholder="Nueva contraseña" autocomplete="new-password" required style="margin:8px 0 10px">
+      <input class="inp" id="pw_conf" type="password" placeholder="Repetir contraseña" autocomplete="new-password" required style="margin-bottom:16px">
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closePasswordModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="pw_btn">Guardar</button>
+      </div>
+    </form>
+  </div>`;
+  ov.style.display='flex';
+  const inp=document.getElementById('pw_new'); if(inp) inp.focus();
+}
+function closePasswordModal(){ const ov=document.getElementById('pwOv'); if(ov) ov.style.display='none'; }
+window.openPasswordModal=openPasswordModal;
+window.closePasswordModal=closePasswordModal;
+window.submitPassword=async (ev)=>{
+  ev.preventDefault();
+  const pass=document.getElementById('pw_new').value;
+  const conf=document.getElementById('pw_conf').value;
+  if(pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return false; }
+  if(pass!==conf){ toast('Las contraseñas no coinciden'); return false; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return false; }
+  const btn=document.getElementById('pw_btn');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  let res, data;
+  try{
+    res=await fetch('/api/me/password',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({password:pass})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast('No se pudo conectar con el servidor');
+    return false;
+  }
+  if(res.ok){ toast('Contraseña actualizada'); closePasswordModal(); }
+  else{
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast(data.error || 'No se pudo cambiar la contraseña');
+  }
+  return false;
 };
 function renderTeam(){
   const ro = !IS_ADMIN;
