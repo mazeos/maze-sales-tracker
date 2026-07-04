@@ -1,23 +1,43 @@
-// server.js — Mini-API de provisioning de miembros para Maze Sales Tracker.
+// server.js — Mini-API de provisioning de miembros e integración GHL para Maze Sales Tracker.
 //
-// Sin dependencias npm: usa solo el módulo nativo `http` y el `fetch` global de Node 22.
+// Sin dependencias npm: usa solo módulos nativos (`http`, `crypto`) y el `fetch` global de Node 22.
 // Gestiona auth users + perfiles con la SERVICE_ROLE_KEY (bypassea RLS), por lo que TODO
 // filtrado por org_id se hace acá, a mano, y toda operación exige que el caller sea admin.
 //
-// Rutas (todas bajo /api/members):
-//   POST   /api/members       -> crea auth user + perfil (alta real, la persona puede loguearse)
-//   DELETE /api/members/{id}   -> soft-delete: active=false + ban del auth user (conserva histórico)
+// Rutas:
+//   POST   /api/members            -> crea auth user + perfil (alta real, la persona puede loguearse)
+//   DELETE /api/members/{id}       -> soft-delete: active=false + ban del auth user (conserva histórico)
+//   GET    /api/oauth/start        -> inicia el flujo OAuth de GHL (redirect a chooselocation)
+//   GET    /api/oauth/callback     -> recibe el code de GHL, intercambia tokens y guarda la integración
+//   GET    /api/integrations/ghl   -> estado de conexión (sin tokens, jamás)
+//   DELETE /api/integrations/ghl   -> desconecta la integración GHL de la org
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
 const ANON_KEY = process.env.ANON_KEY || '';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
+// Env vars de la integración GHL (opcionales: la API arranca igual sin ellas).
+// Los valores reales NUNCA van al código (repo público): solo por env.
+const GHL_CLIENT_ID = process.env.GHL_CLIENT_ID || '';
+const GHL_CLIENT_SECRET = process.env.GHL_CLIENT_SECRET || '';
+const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+const GHL_ENABLED = !!(GHL_CLIENT_ID && GHL_CLIENT_SECRET && PUBLIC_URL);
+const GHL_REDIRECT_URI = PUBLIC_URL + '/api/oauth/callback';
+
+// Scopes que pide la app del Marketplace (space-separated).
+const GHL_SCOPES = 'users.readonly calendars.readonly calendars/events.readonly contacts.readonly contacts.write opportunities.readonly opportunities.write conversations/message.readonly locations.readonly';
+
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
   console.error('[api] Faltan env vars: SUPABASE_URL, SERVICE_ROLE_KEY y/o ANON_KEY. La API no puede arrancar.');
   process.exit(1);
+}
+
+if (!GHL_ENABLED) {
+  console.log('[api] Integración GHL no configurada (faltan GHL_CLIENT_ID/GHL_CLIENT_SECRET/PUBLIC_URL). La API arranca en modo manual.');
 }
 
 const VALID_ROLES = ['setter', 'triage', 'closer'];
@@ -61,13 +81,17 @@ function svcHeaders(extra = {}) {
   };
 }
 
-// ---------- Middleware de auth: valida el JWT del caller y exige role=admin ----------
-// Devuelve { ok:true, uid, org_id } si el caller es admin; si no, { ok:false, status, error }.
-async function requireAdmin(req) {
-  const authHeader = req.headers['authorization'] || '';
-  if (!authHeader.toLowerCase().startsWith('bearer ')) {
+// ---------- Auth: valida un JWT y exige role=admin ----------
+// checkAdminToken recibe el token ('Bearer xxx' o el token pelado) y devuelve
+// { ok:true, uid, org_id } si el caller es admin; si no, { ok:false, status, error }.
+// requireAdmin(req) es el wrapper que lee el header Authorization.
+async function checkAdminToken(bearerToken) {
+  let token = (bearerToken || '').trim();
+  if (token.toLowerCase().startsWith('bearer ')) token = token.slice(7).trim();
+  if (!token) {
     return { ok: false, status: 401, error: 'Falta el token de sesión' };
   }
+  const authHeader = 'Bearer ' + token;
 
   // 1. Validar el JWT contra GoTrue (no confiamos en claims del cliente).
   let userRes;
@@ -107,6 +131,91 @@ async function requireAdmin(req) {
   }
 
   return { ok: true, uid, org_id: prof.org_id };
+}
+
+function requireAdmin(req) {
+  return checkAdminToken(req.headers['authorization'] || '');
+}
+
+// ---------- Helpers OAuth GHL ----------
+// Redirect 302 simple (navegaciones del browser, no fetch).
+function redirect(res, url) {
+  res.writeHead(302, { Location: url });
+  res.end();
+}
+
+// State firmado con HMAC-SHA256 (secreto: SERVICE_ROLE_KEY). Lleva el org_id y un
+// timestamp; el callback solo confía en un state cuya firma verifique y que tenga
+// menos de 10 minutos de vida. Así nadie puede forjar un callback para otra org.
+function signState(org) {
+  const payload = Buffer.from(JSON.stringify({ org, ts: Date.now() })).toString('base64url');
+  const firma = crypto.createHmac('sha256', SERVICE_ROLE_KEY).update(payload).digest('base64url');
+  return payload + '.' + firma;
+}
+
+function verifyState(state) {
+  try {
+    const parts = String(state || '').split('.');
+    if (parts.length !== 2) return { ok: false };
+    const [payload, firma] = parts;
+    const esperada = crypto.createHmac('sha256', SERVICE_ROLE_KEY).update(payload).digest('base64url');
+    const a = Buffer.from(firma);
+    const b = Buffer.from(esperada);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false };
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!data || !data.org || typeof data.ts !== 'number') return { ok: false };
+    if (Date.now() - data.ts >= 10 * 60 * 1000) return { ok: false }; // expira a los 10 min
+    return { ok: true, org: data.org };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// Refresca el access_token de GHL si está por vencer (a menos de 5 min).
+// Queda listo para las fases siguientes de sync; hoy ninguna ruta crítica lo consume.
+async function refreshGhlToken(integration) {
+  const expiresAt = integration.token_expires_at ? new Date(integration.token_expires_at).getTime() : 0;
+  if (expiresAt - Date.now() >= 5 * 60 * 1000) {
+    return integration.access_token; // todavía sirve, no hace falta refresh
+  }
+
+  const tokenRes = await fetch('https://services.leadconnectorhq.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GHL_CLIENT_ID,
+      client_secret: GHL_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+      refresh_token: integration.refresh_token,
+      user_type: 'Location',
+    }),
+  });
+  const tok = await tokenRes.json().catch(() => ({}));
+  if (tokenRes.status < 200 || tokenRes.status >= 300 || !tok.access_token) {
+    console.error(`[api] refreshGhlToken org=${integration.org_id} fail status=${tokenRes.status}`);
+    throw new Error('No se pudo refrescar el token de GHL');
+  }
+
+  // Persistir los tokens nuevos (refresh token rotado de un solo uso).
+  const patchRes = await fetch(
+    SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(integration.org_id),
+    {
+      method: 'PATCH',
+      headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+      body: JSON.stringify({
+        access_token: tok.access_token,
+        refresh_token: tok.refresh_token,
+        token_expires_at: new Date(Date.now() + (tok.expires_in || 0) * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    }
+  );
+  if (patchRes.status < 200 || patchRes.status >= 300) {
+    console.error(`[api] refreshGhlToken org=${integration.org_id} patch_fail status=${patchRes.status}`);
+    throw new Error('No se pudo guardar el token refrescado de GHL');
+  }
+
+  return tok.access_token;
 }
 
 // ---------- POST /api/members ----------
@@ -229,6 +338,166 @@ async function deleteMember(req, res, admin, id) {
   return sendJSON(res, 200, { ok: true });
 }
 
+// ---------- GET /api/oauth/start ----------
+// Es una navegación del browser (no fetch), así que el JWT llega por query ?token=.
+// Valida admin con la misma lógica que requireAdmin y redirige al chooselocation de GHL.
+async function oauthStart(req, res, url) {
+  if (!GHL_ENABLED) {
+    return sendJSON(res, 503, { error: 'Integración GHL no configurada' });
+  }
+  const admin = await checkAdminToken(url.searchParams.get('token') || '');
+  if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+
+  const authUrl = 'https://marketplace.gohighlevel.com/oauth/chooselocation'
+    + '?response_type=code'
+    + '&redirect_uri=' + encodeURIComponent(GHL_REDIRECT_URI)
+    + '&client_id=' + GHL_CLIENT_ID
+    + '&scope=' + encodeURIComponent(GHL_SCOPES)
+    + '&state=' + signState(admin.org_id);
+
+  console.log(`[api] GET /api/oauth/start org=${admin.org_id} -> redirect a GHL`);
+  return redirect(res, authUrl);
+}
+
+// ---------- GET /api/oauth/callback ----------
+// Viene de GHL, sin sesión de usuario: la autenticidad la da el state firmado.
+async function oauthCallback(req, res, url) {
+  if (!GHL_ENABLED) {
+    return sendJSON(res, 503, { error: 'Integración GHL no configurada' });
+  }
+
+  // 1. Verificar el state (firma HMAC + expiración de 10 min).
+  const st = verifyState(url.searchParams.get('state'));
+  if (!st.ok) {
+    console.log('[api] GET /api/oauth/callback state_invalido -> redirect ghl_error=state');
+    return redirect(res, PUBLIC_URL + '/?ghl_error=state');
+  }
+  const orgId = st.org;
+
+  // 2. Code de autorización.
+  const code = url.searchParams.get('code');
+  if (!code) {
+    console.log(`[api] GET /api/oauth/callback org=${orgId} sin_code -> redirect ghl_error=code`);
+    return redirect(res, PUBLIC_URL + '/?ghl_error=code');
+  }
+
+  // 3. Intercambiar el code por tokens.
+  let tok;
+  try {
+    const tokenRes = await fetch('https://services.leadconnectorhq.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GHL_CLIENT_ID,
+        client_secret: GHL_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        user_type: 'Location',
+        redirect_uri: GHL_REDIRECT_URI,
+      }),
+    });
+    tok = await tokenRes.json().catch(() => ({}));
+    if (tokenRes.status < 200 || tokenRes.status >= 300 || !tok.access_token || !tok.locationId) {
+      console.error(`[api] GET /api/oauth/callback org=${orgId} token_fail status=${tokenRes.status}`);
+      return redirect(res, PUBLIC_URL + '/?ghl_error=token');
+    }
+  } catch {
+    console.error(`[api] GET /api/oauth/callback org=${orgId} token_fetch_fail`);
+    return redirect(res, PUBLIC_URL + '/?ghl_error=token');
+  }
+
+  // 4. Nombre de la subcuenta (best-effort: si falla, usamos el locationId).
+  let locationName = tok.locationId;
+  try {
+    const locRes = await fetch('https://services.leadconnectorhq.com/locations/' + encodeURIComponent(tok.locationId), {
+      headers: { 'Authorization': 'Bearer ' + tok.access_token, 'Version': '2021-07-28' },
+    });
+    if (locRes.status >= 200 && locRes.status < 300) {
+      const locBody = await locRes.json().catch(() => null);
+      if (locBody && locBody.location && locBody.location.name) locationName = locBody.location.name;
+    }
+  } catch { /* best-effort: nunca abortar la conexión por el nombre */ }
+
+  // 5. UPSERT de la integración (una por org).
+  try {
+    const upsertRes = await fetch(SUPABASE_URL + '/rest/v1/st_integrations?on_conflict=org_id', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates' }),
+      body: JSON.stringify({
+        org_id: orgId,
+        provider: 'ghl',
+        location_id: tok.locationId,
+        location_name: locationName,
+        access_token: tok.access_token,
+        refresh_token: tok.refresh_token,
+        token_expires_at: new Date(Date.now() + (tok.expires_in || 0) * 1000).toISOString(),
+        company_id: tok.companyId || null,
+        scopes: tok.scope || null,
+        connected_by: null, // el callback no tiene sesión de usuario; el dato clave es org_id
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (upsertRes.status < 200 || upsertRes.status >= 300) {
+      console.error(`[api] GET /api/oauth/callback org=${orgId} save_fail status=${upsertRes.status}`);
+      return redirect(res, PUBLIC_URL + '/?ghl_error=save');
+    }
+  } catch {
+    console.error(`[api] GET /api/oauth/callback org=${orgId} save_fetch_fail`);
+    return redirect(res, PUBLIC_URL + '/?ghl_error=save');
+  }
+
+  console.log(`[api] GET /api/oauth/callback org=${orgId} location=${tok.locationId} -> connected`);
+  return redirect(res, PUBLIC_URL + '/?ghl=connected');
+}
+
+// ---------- GET /api/integrations/ghl ----------
+// Estado de conexión para la UI. NUNCA incluye access_token/refresh_token:
+// el select pide solo las columnas públicas.
+async function getGhlStatus(req, res, admin) {
+  let rows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id)
+        + '&select=location_id,location_name,created_at',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) {
+      return sendJSON(res, 500, { error: 'No se pudo leer el estado de la integración' });
+    }
+    rows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer el estado de la integración' });
+  }
+
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return sendJSON(res, 200, { connected: false });
+  return sendJSON(res, 200, {
+    connected: true,
+    location_id: row.location_id,
+    location_name: row.location_name,
+    connected_at: row.created_at,
+  });
+}
+
+// ---------- DELETE /api/integrations/ghl ----------
+// Desconecta la integración de la org. Idempotente: ok aunque no hubiera fila.
+async function disconnectGhl(req, res, admin) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id),
+      { method: 'DELETE', headers: svcHeaders({ 'Prefer': 'return=minimal' }) }
+    );
+    if (r.status < 200 || r.status >= 300) {
+      console.log(`[api] DELETE /api/integrations/ghl admin=${admin.uid} fail status=${r.status} -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo desconectar la integración' });
+    }
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo desconectar la integración' });
+  }
+  console.log(`[api] DELETE /api/integrations/ghl admin=${admin.uid} org=${admin.org_id} -> 200`);
+  return sendJSON(res, 200, { ok: true });
+}
+
 // ---------- Router ----------
 const server = http.createServer(async (req, res) => {
   try {
@@ -238,6 +507,21 @@ const server = http.createServer(async (req, res) => {
     // Health-check simple (sin auth).
     if (req.method === 'GET' && path === '/api/health') {
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // Rutas de la integración GHL.
+    if (req.method === 'GET' && path === '/api/oauth/start') {
+      return oauthStart(req, res, url);
+    }
+
+    if (req.method === 'GET' && path === '/api/oauth/callback') {
+      return oauthCallback(req, res, url);
+    }
+
+    if (path === '/api/integrations/ghl' && (req.method === 'GET' || req.method === 'DELETE')) {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return req.method === 'GET' ? getGhlStatus(req, res, admin) : disconnectGhl(req, res, admin);
     }
 
     // Todo lo demás bajo /api/members exige admin.

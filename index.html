@@ -968,6 +968,59 @@ window.tblEdit=(el)=>{
 
 // ---------- Equipo ----------
 function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=sumMember(m.id, r.start, r.end); return Math.round((m.commission||0)/100 * (s.cash_nuevo||0)); }
+
+// ---------- Integración HighLevel ----------
+// Estado de la conexión GHL de la org (null = todavía no se consultó a la API).
+let GHL_STATUS=null, GHL_LOADING=false;
+async function loadGhlStatus(){
+  if(!IS_ADMIN || GHL_LOADING) return;
+  GHL_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ GHL_STATUS={connected:false,error:true}; return; }
+    const res=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    GHL_STATUS=(res.ok && data) ? data : {connected:false,error:true};
+  }catch(e){ GHL_STATUS={connected:false,error:true}; }
+  finally{ GHL_LOADING=false; if(state.view==='team') renderTeam(); }
+}
+function ghlCard(){
+  if(!IS_ADMIN) return '';
+  let body='';
+  if(GHL_STATUS===null){
+    loadGhlStatus();
+    body=`<p style="color:var(--muted);font-size:13px;margin:0">Verificando conexión…</p>`;
+  } else if(GHL_STATUS.error){
+    body=`<p style="color:var(--muted);font-size:13px;margin:0">No se pudo consultar el estado de la integración. Recargá la página para reintentar.</p>`;
+  } else if(GHL_STATUS.connected){
+    const fecha=GHL_STATUS.connected_at ? new Date(GHL_STATUS.connected_at).toLocaleDateString('es-AR',{day:'numeric',month:'short',year:'numeric'}) : '';
+    body=`<p style="font-size:13.5px;margin:0 0 12px">✅ Conectado a <b>${esc(GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta')}</b>${fecha?` <span style="color:var(--muted)">· desde el ${fecha}</span>`:''}</p>
+      <button class="btn danger sm" onclick="disconnectGhl()">Desconectar</button>`;
+  } else {
+    body=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Conectá tu subcuenta de HighLevel para que el tracker cargue actividad automáticamente. Sin conexión, la carga manual sigue funcionando igual.</p>
+      <button class="btn" onclick="connectGhl()">Conectar con HighLevel</button>`;
+  }
+  return `<div class="section"><div class="eyebrow">Integración HighLevel</div>${body}</div>`;
+}
+window.connectGhl=async ()=>{
+  if(!IS_ADMIN) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  location.href='/api/oauth/start?token='+encodeURIComponent(session.access_token);
+};
+window.disconnectGhl=async ()=>{
+  if(!IS_ADMIN) return;
+  if(!confirm('¿Desconectar HighLevel? La carga manual sigue funcionando.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/integrations/ghl',{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; renderTeam(); }
+  else{ toast(data.error || 'No se pudo desconectar'); }
+};
 function renderTeam(){
   const ro = !IS_ADMIN;
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
@@ -1009,7 +1062,8 @@ function renderTeam(){
         <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
-    </div>` : ''}` + footer();
+    </div>` : ''}
+    ${ghlCard()}` + footer();
 }
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
@@ -1158,6 +1212,15 @@ async function boot(){
   const {data:prof}=await sb.from('st_profiles').select('*').eq('id',session.user.id).maybeSingle();
   if(!prof){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
   ME={id:prof.id,role:prof.role,name:prof.name,org_id:prof.org_id}; IS_ADMIN=prof.role==='admin';
+  // Retorno del flujo OAuth de GHL (query params que deja el callback de la mini-API).
+  const qs=new URLSearchParams(location.search);
+  if(qs.get('ghl')==='connected'){
+    toast('HighLevel conectado ✅');
+    history.replaceState(null,'',location.pathname);
+  } else if(qs.get('ghl_error')){
+    toast(qs.get('ghl_error')==='state' ? 'El enlace expiró, intentá conectar de nuevo' : 'No se pudo conectar con HighLevel');
+    history.replaceState(null,'',location.pathname);
+  }
   await loadFromSupabase();
   state.capMember = IS_ADMIN ? (DB.members[0]&&DB.members[0].id) : ME.id;
   state.tblMember = state.capMember;
