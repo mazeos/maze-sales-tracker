@@ -74,6 +74,10 @@ const GHL_LOCATION = process.env.GHL_LOCATION || '';
 const GHL_CALENDAR = process.env.GHL_CALENDAR || '';
 const SLACK_TOKEN = process.env.SLACK_TOKEN || '';
 const SLACK_WINS_CHANNEL = process.env.SLACK_WINS_CHANNEL || '';
+// Shared secret de la app del Marketplace: GHL cifra los datos del usuario con
+// esta clave y nos los pasa por postMessage cuando el tracker corre embebido
+// en una Custom Page. Sin la key, el SSO queda deshabilitado (fail-closed).
+const GHL_SSO_KEY = process.env.GHL_SSO_KEY || '';
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 
 // Parseo tolerante: si el env falta o el JSON es inválido, la constante queda null
@@ -2598,6 +2602,123 @@ async function listAgencyLocations(req, res, sa, url) {
   return sendJSON(res, 200, { locations: out, total });
 }
 
+// ---------- SSO desde GHL (Custom Page embebida) ----------
+// GHL cifra los datos del usuario con CryptoJS.AES.encrypt(json, sharedSecret)
+// y nos los pasa por postMessage. Ese formato es OpenSSL "Salted__": base64 de
+// "Salted__"(8) + salt(8) + ciphertext. La key+iv se derivan con EVP_BytesToKey
+// (MD5, sin iteraciones): D_i = MD5(D_{i-1} + password + salt), concatenar hasta
+// 48 bytes → key=32, iv=16, luego AES-256-CBC.
+function evpBytesToKey(password, salt, keyLen, ivLen) {
+  const pass = Buffer.from(password, 'utf8');
+  let d = Buffer.alloc(0);
+  let prev = Buffer.alloc(0);
+  while (d.length < keyLen + ivLen) {
+    prev = crypto.createHash('md5').update(Buffer.concat([prev, pass, salt])).digest();
+    d = Buffer.concat([d, prev]);
+  }
+  return { key: d.subarray(0, keyLen), iv: d.subarray(keyLen, keyLen + ivLen) };
+}
+function decryptGhlPayload(payloadB64, secret) {
+  const raw = Buffer.from(String(payloadB64), 'base64');
+  if (raw.length < 16 || raw.subarray(0, 8).toString('utf8') !== 'Salted__') {
+    throw new Error('formato de payload inesperado');
+  }
+  const salt = raw.subarray(8, 16);
+  const ciphertext = raw.subarray(16);
+  const { key, iv } = evpBytesToKey(secret, salt, 32, 16);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  const out = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return JSON.parse(out.toString('utf8'));
+}
+
+// POST /api/sso/ghl — pública (el payload cifrado ES la credencial). Resuelve el
+// usuario+subcuenta de GHL contra una membresía del tracker y devuelve un
+// token_hash de magic link para que el frontend abra sesión sin contraseña.
+async function ssoGhl(req, res) {
+  if (!GHL_SSO_KEY) return sendJSON(res, 501, { error: 'SSO no está configurado en esta instancia' });
+  const parsed = await readJSONBody(req);
+  const payload = parsed.ok && parsed.data && parsed.data.payload;
+  if (!payload) return sendJSON(res, 400, { error: 'Falta el payload de SSO' });
+
+  let data;
+  try { data = decryptGhlPayload(payload, GHL_SSO_KEY); } catch {
+    return sendJSON(res, 401, { error: 'Payload de SSO inválido' });
+  }
+  const ghlUserId = data && (data.userId || data.user_id);
+  const activeLocation = data && (data.activeLocation || data.locationId || data.location_id);
+  const claimEmail = data && data.email ? String(data.email).toLowerCase().trim() : '';
+  if (!ghlUserId || !activeLocation) {
+    return sendJSON(res, 400, { error: 'El payload de SSO no trae usuario o subcuenta' });
+  }
+
+  // Subcuenta GHL → org del tracker (por la integración autorizada).
+  let orgId = null;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_integrations?location_id=eq.'
+      + encodeURIComponent(activeLocation) + '&select=org_id', { headers: svcHeaders() });
+    const rows = r.status === 200 ? await r.json().catch(() => []) : [];
+    orgId = rows[0] && rows[0].org_id;
+  } catch { /* cae a 403 abajo */ }
+  if (!orgId) return sendJSON(res, 403, { error: 'Esta subcuenta no tiene un equipo del tracker vinculado' });
+
+  // Perfil del usuario en esa org: primero por ghl_user_id, luego por email del login.
+  let prof = null;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
+      + '&ghl_user_id=eq.' + encodeURIComponent(ghlUserId) + '&select=id,user_id,active', { headers: svcHeaders() });
+    const rows = r.status === 200 ? await r.json().catch(() => []) : [];
+    prof = rows.find((p) => p.active !== false) || null;
+  } catch { /* sigue con el fallback por email */ }
+
+  let authUid = prof && prof.user_id;
+  if (!prof && claimEmail) {
+    const authUser = await findAuthUserByEmail(claimEmail);
+    if (authUser && authUser.id) {
+      authUid = authUser.id;
+      try {
+        const r = await fetch(SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
+          + '&user_id=eq.' + encodeURIComponent(authUid) + '&select=id,user_id,active', { headers: svcHeaders() });
+        const rows = r.status === 200 ? await r.json().catch(() => []) : [];
+        prof = rows.find((p) => p.active !== false) || null;
+      } catch { /* 403 abajo */ }
+    }
+  }
+  if (!prof || !authUid) {
+    return sendJSON(res, 403, { error: 'Tu usuario de GHL no está habilitado en este equipo del tracker' });
+  }
+
+  // Email real del login (el magic link se emite contra ese email).
+  const email = await getAuthEmail(authUid, new Map());
+  if (!email) return sendJSON(res, 403, { error: 'No se encontró la cuenta del usuario' });
+
+  // Dejar el perfil de ESTA org como activo (multi-cuenta) antes de loguear.
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/st_user_state?on_conflict=user_id', {
+      method: 'POST',
+      headers: svcHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' }),
+      body: JSON.stringify({ user_id: authUid, active_profile_id: prof.id, updated_at: new Date().toISOString() }),
+    });
+  } catch { /* best-effort: el boot igual cae al selector si falla */ }
+
+  // Magic link vía GoTrue admin. JAMÁS loggear el token de acá en más.
+  let token = '';
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/admin/generate_link', {
+      method: 'POST', headers: svcHeaders(),
+      body: JSON.stringify({ type: 'magiclink', email, redirect_to: PUBLIC_URL }),
+    });
+    if (r.status < 200 || r.status >= 300) return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+    const d = await r.json().catch(() => null);
+    const props = (d && d.properties) || {};
+    token = (d && d.hashed_token) || props.hashed_token || '';
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+  }
+  if (!token) return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+
+  return sendJSON(res, 200, { ok: true, token_hash: token });
+}
+
 // ---------- Router ----------
 const server = http.createServer(async (req, res) => {
   try {
@@ -2607,6 +2728,11 @@ const server = http.createServer(async (req, res) => {
     // Health-check simple (sin auth).
     if (req.method === 'GET' && path === '/api/health') {
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // SSO desde GHL: pública (el payload cifrado ES la credencial).
+    if (req.method === 'POST' && path === '/api/sso/ghl') {
+      return ssoGhl(req, res);
     }
 
     // Rutas de la integración GHL.
