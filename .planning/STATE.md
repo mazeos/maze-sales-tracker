@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-06-30 — Roadmap creado (5 fases, 33 requisitos mapeados)
+Last activity: 2026-07-05 - Feature Caja/cuotas por cobrar completa (spec+plan+DB+UI+QA), desplegada en Clara, PR #10 a main
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -56,6 +56,24 @@ None yet.
 ### Blockers/Concerns
 
 - REQUIREMENTS.md declaraba "31 requisitos v1" pero hay 33 IDs reales; el roadmap mapea los 33. Traceability actualizada en consecuencia.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260702-nhd | Gating admin-only en UI de Configuraciones y Metas | 2026-07-02 | e94bf33 | [260702-nhd-gating-admin-only-en-ui-de-configuracion](./quick/260702-nhd-gating-admin-only-en-ui-de-configuracion/) |
+| 260702-onz | Mini-API de provisioning de miembros (alta/baja server-side) | 2026-07-02 | 147f6de | [260702-onz-mini-api-de-provisioning-de-miembros-alt](./quick/260702-onz-mini-api-de-provisioning-de-miembros-alt/) |
+| 260704-p9c | Integración GHL Fase 1 — Conexión OAuth de subcuenta desde Configuraciones | 2026-07-04 | 06ff588 | [260704-p9c-integraci-n-ghl-fase-1-conexi-n-oauth-de](./quick/260704-p9c-integraci-n-ghl-fase-1-conexi-n-oauth-de/) |
+| 260704-r0e | Fase 2 carcasa GHL — Usuarios desde HighLevel (import + código de acceso + sync) | 2026-07-04 | (merge) | [260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle](./quick/260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle/) |
+| 260704-tiv | Fase 2.1 carcasa GHL — equipo 100% sincronizado + fix import email preexistente | 2026-07-04 | (merge) | [260704-tiv-fase-2-1-carcasa-ghl-equipo-100-sincroni](./quick/260704-tiv-fase-2-1-carcasa-ghl-equipo-100-sincroni/) |
+| 260704-tu4 | Fase 2.2 carcasa GHL — reconciliación total (auto-vincular + baja de huérfanos) | 2026-07-04 | (merge) | [260704-tu4-fase-2-2-carcasa-ghl-reconciliaci-n-tota](./quick/260704-tu4-fase-2-2-carcasa-ghl-reconciliaci-n-tota/) |
+| 260704-u3n | Portar mejoras de la instancia de Clara (Ventas GHL, dblclick, rail, a11y) | 2026-07-04 | (merge) | [260704-u3n-portar-mejoras-de-la-instancia-de-clara-](./quick/260704-u3n-portar-mejoras-de-la-instancia-de-clara-/) |
+| 260704-uud | Fase 2.3 carcasa GHL — calendario de llamadas por org (closers sincronizados) | 2026-07-04 | (merge) | [260704-uud-fase-2-3-carcasa-ghl-calendario-de-llama](./quick/260704-uud-fase-2-3-carcasa-ghl-calendario-de-llama/) |
+| 260704-vqc | Panel super-admin de Organizaciones (alta de tenants) | 2026-07-04 | (merge) | [260704-vqc-panel-super-admin-de-organizaciones-alta](./quick/260704-vqc-panel-super-admin-de-organizaciones-alta/) |
+| 260704-wmy | Vista Plataforma super-admin — API de agencia + alta con subcuenta pre-vinculada | 2026-07-04 | (merge) | [260704-wmy-vista-plataforma-super-admin-api-de-agen](./quick/260704-wmy-vista-plataforma-super-admin-api-de-agen/) |
+| 260705-020 | Combobox cómodo para el buscador de subcuentas en Plataforma | 2026-07-05 | (merge) | [260705-020-combobox-c-modo-para-el-buscador-de-subc](./quick/260705-020-combobox-c-modo-para-el-buscador-de-subc/) |
+| 260705-14a | Gestión de miembros y permisos por org desde Plataforma | 2026-07-05 | (merge) | [260705-14a-gesti-n-de-miembros-y-permisos-por-org-d](./quick/260705-14a-gesti-n-de-miembros-y-permisos-por-org-d/) |
+| 260705-1ln | Eliminar organizaciones + Entrar como (impersonación) en Plataforma | 2026-07-05 | (merge) | [260705-1ln-eliminar-organizaciones-entrar-como-impe](./quick/260705-1ln-eliminar-organizaciones-entrar-como-impe/) |
 
 ## Deferred Items
 

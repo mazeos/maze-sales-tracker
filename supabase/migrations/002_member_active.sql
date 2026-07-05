@@ -1,0 +1,11 @@
+-- 002_member_active.sql
+-- Soft-delete de miembros del equipo.
+--
+-- La baja de un miembro es SIEMPRE soft (active = false), nunca un DELETE del perfil.
+-- Motivo: st_entries.member_id referencia a st_profiles con ON DELETE CASCADE, así que
+-- borrar el perfil arrastraría y perdería todos los datos históricos de actividad de esa
+-- persona (entries, ventas atribuidas, etc.). Marcando active = false conservamos el
+-- histórico y solo lo excluimos de la UI + baneamos su login en auth.
+--
+-- Idempotente: se puede correr múltiples veces sin error.
+alter table public.st_profiles add column if not exists active boolean not null default true;

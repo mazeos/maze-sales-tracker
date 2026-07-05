@@ -106,6 +106,7 @@
   .tag.warn{color:var(--amber);background:rgba(245,177,76,.10)}
   .tag.bad{color:var(--danger);background:rgba(242,85,90,.10)}
   .empty{color:var(--faint);font-size:12.5px;padding:6px 0}
+  .admin-lock{display:flex;gap:9px;align-items:flex-start;background:rgba(245,177,76,.10);border:1px solid rgba(245,177,76,.35);color:var(--amber);font-size:12.5px;line-height:1.45;padding:10px 13px;border-radius:11px;margin-bottom:16px}
 
   .reps{display:flex;flex-direction:column;gap:10px}
   .rep{display:grid;grid-template-columns:36px 1fr auto;gap:12px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2)}
@@ -167,6 +168,16 @@
   .field label{font-size:12px;color:var(--muted);font-weight:500}
   .inp{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink);font-size:14px;width:100%}
   .inp:focus{outline:none;border-color:var(--lima-dim)}
+  .inp:disabled{opacity:.4;cursor:not-allowed}
+  /* móvil: instructivo compacto (expandible al tocarlo), tooltips del rail ocultos */
+  @media(max-width:520px){
+    .cap-intro p{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+    .cap-intro.open p{display:block;-webkit-line-clamp:unset}
+    .nav-i .tt{display:none}
+  }
+  /* foco de teclado en la navegación */
+  .nav-i:focus-visible{outline:2px solid var(--lima);outline-offset:2px}
+
   .btn{background:var(--lima);color:var(--on-accent);border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px}
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
   .btn.sm{padding:7px 12px;font-size:13px}
@@ -174,12 +185,38 @@
   .list{display:flex;flex-direction:column;gap:9px}
   .li{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
   .li .who{font-size:14px;font-weight:600}
+
+  /* combobox — buscador de subcuentas (Plataforma). Solo tokens: sirve en ambos temas */
+  .cbx-wrap{position:relative}
+  .cbx-panel{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:60;max-height:320px;overflow-y:auto;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:6px}
+  .cbx-head{font-size:11.5px;color:var(--muted);padding:6px 10px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
+  .cbx-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer;border:1px solid transparent}
+  .cbx-item.hl{background:var(--surface);border-color:var(--lima)}
+  .cbx-item.off{opacity:.45;cursor:default}
+  .cbx-ava{width:28px;height:28px;border-radius:50%;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--ink);flex:none}
+  .cbx-name{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .cbx-meta{font-size:11.5px;color:var(--muted)}
+  .cbx-badge{margin-left:auto;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:100px;padding:2px 8px;white-space:nowrap}
   .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:100px;text-transform:capitalize}
   .pill.setter{background:rgba(108,92,231,.16);color:#a99bff}
   .pill.triage{background:rgba(245,177,76,.14);color:var(--amber)}
   .pill.closer{background:rgba(197,255,73,.14);color:var(--lime-ink)}
 
+  /* chips de estado — Equipo desde HighLevel */
+  .pill.st-nuevo{background:rgba(108,92,231,.16);color:#a99bff}
+  .pill.st-vinculable{background:rgba(245,177,76,.14);color:var(--amber)}
+  .pill.st-importado{background:rgba(197,255,73,.14);color:var(--lime-ink)}
+  .pill.st-inactivo{background:rgba(139,139,153,.16);color:var(--muted)}
+  .ghl-code{display:flex;align-items:center;justify-content:space-between;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;flex-wrap:wrap}
+  .ghl-code-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:17px;letter-spacing:.03em;color:var(--lime-ink)}
+  .ghl-code-txt{color:var(--muted);font-size:12.5px;margin-top:5px;max-width:520px}
+  .ghl-ok{color:var(--lime-ink);font-weight:700;font-size:15px}
+
   .section{margin-bottom:22px}
+  .cuo-est{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:rgba(127,127,127,.14);color:var(--muted);white-space:nowrap}
+  .ghl-badge{font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:10px;background:rgba(197,255,73,.16);color:var(--lime-ink,#C5FF49);margin-left:6px;vertical-align:middle}
+  .cuo-est.venc{background:rgba(255,77,77,.14);color:#ff6b6b}
+  .cuo-est.paga{background:rgba(74,222,128,.14);color:#4ade80}
   .section .eyebrow{margin-bottom:12px}
   .cards-mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
   .mini{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 15px}
@@ -247,12 +284,15 @@
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
   /* contraste de roles/tags en claro */
   body[data-theme="light"] .pill.setter,
+  body[data-theme="light"] .pill.st-nuevo,
   body[data-theme="light"] .rep.setter .rav{color:#5b45d6;background:rgba(108,92,231,.12)}
+  body[data-theme="light"] .pill.st-vinculable{color:#7d5300;background:rgba(245,177,76,.16)}
   body[data-theme="light"] .pill.triage,
   body[data-theme="light"] .rep.triage .rav,
   body[data-theme="light"] .tag.warn,
   body[data-theme="light"] .rep .kpi .n.warn{color:#7d5300}
   body[data-theme="light"] .tag.warn{background:rgba(245,177,76,.16)}
+  body[data-theme="light"] .admin-lock{color:#7d5300;background:rgba(245,177,76,.16)}
   body[data-theme="light"] .tag.bad,
   body[data-theme="light"] .rep .kpi .n.bad,
   body[data-theme="light"] .conv.bad{color:#c8353a}
@@ -320,22 +360,31 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/><circle cx="12" cy="10" r="1.4" fill="#C5FF49" stroke="none"/></svg>
     </div>
     <div class="nav-i" data-view="dashboard" title="Panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="tt">Panel</span></div>
+    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
+    <div class="nav-i" data-view="caja" title="Caja"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M16 15.5h2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7"/></svg><span class="tt">Caja</span></div>
     <div class="nav-i" data-view="capture" title="Cargar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="tt">Cargar día</span></div>
     <div class="nav-i" data-view="table" title="Tabla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15"/></svg><span class="tt">Tabla (día por día)</span></div>
-    <div class="nav-i" data-view="team" title="Configuraciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.7 7.7 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1H10.6l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.7 7.7 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h2.8l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 1.7-3z"/></svg><span class="tt">Configuraciones</span></div>
     <div class="nav-i" data-view="goals" title="Metas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="tt">Metas</span></div>
-    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="spacer"></div>
+    <!-- Plataforma: oculto por defecto; se muestra solo si /api/platform/settings responde 200 (super-admin). La seguridad real es server-side. -->
+    <div class="nav-i" data-view="platform" id="nav-platform" title="Plataforma" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9.5 7h1M13.5 7h1M9.5 11h1M13.5 11h1M9.5 15h1M13.5 15h1M10.5 21v-3h3v3"/></svg><span class="tt">Plataforma</span></div>
+    <div class="nav-i" data-view="team" title="Configuraciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.7 7.7 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1H10.6l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.7 7.7 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h2.8l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 1.7-3z"/></svg><span class="tt">Configuraciones</span></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
-    <div class="nav-i" data-action="reset" title="Reiniciar datos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3 8.5"/><path d="M3 3.5v5h5"/></svg><span class="tt">Reiniciar demo</span></div>
+    <div class="nav-i" data-action="password" title="Cambiar mi contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg><span class="tt">Cambiar mi contraseña</span></div>
+    <div class="nav-i" data-action="logout" title="Cerrar sesión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg><span class="tt">Cerrar sesión</span></div>
     <div class="avatar" title="Owner">A</div>
   </nav>
   <main class="main" id="view"></main>
 </div>
 <div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
 "use strict";
+const SB_URL='https://supabase.mazefunnels.io';
+const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzcyMzIwMDg0LCJleHAiOjIwODc2ODAwODR9.Qdqi7o23mq0aGvzigUzLlVyk9Eo0Sr8vtEmImquTqOw';
+const sb=window.supabase.createClient(SB_URL,SB_ANON,{auth:{persistSession:true,autoRefreshToken:true}});
+let ME=null, IS_ADMIN=false;
 /* ============================================================
    Maze Sales Tracker IA — app funcional (client-side, localStorage)
    Modelo de datos con paridad a la planilla CAMINO DIGITAL.
@@ -393,7 +442,35 @@ function dstr(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'
 function parseD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function uid(){ return 'm'+Math.random().toString(36).slice(2,8); }
 
-function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+function save(){ try{localStorage.setItem(KEY, JSON.stringify(DB));}catch(e){} schedulePush(); }
+let _pt;
+function schedulePush(){ if(!ME) return; clearTimeout(_pt); _pt=setTimeout(pushToSupabase,600); }
+async function pushToSupabase(){
+  if(!ME||!DB.team.id) return;
+  const rows=[]; for(const k in DB.entries){ const i=k.indexOf('|'); const mid=k.slice(0,i), ds=k.slice(i+1); if(IS_ADMIN||mid===ME.id) rows.push({org_id:DB.team.id,member_id:mid,entry_date:ds,metrics:DB.entries[k]}); }
+  if(rows.length){ const {error}=await sb.from('st_entries').upsert(rows,{onConflict:'member_id,entry_date'}); if(error) console.warn('entries',error.message); }
+  if(IS_ADMIN){
+    await sb.from('st_orgs').update({name:DB.team.name,team_mode:DB.team.mode,tz:DB.team.tz,commission_base:DB.team.commission_base||'contador'}).eq('id',DB.team.id);
+    for(const m of DB.members){ await sb.from('st_profiles').update({name:m.name,role:m.role,commission:m.commission||0}).eq('id',m.id); }
+    await sb.from('st_goals').upsert({org_id:DB.team.id,period:'week',goals:DB.goals.week||{}},{onConflict:'org_id,period'});
+    await sb.from('st_goals').upsert({org_id:DB.team.id,period:'month',goals:DB.goals.month||{}},{onConflict:'org_id,period'});
+  }
+}
+async function loadFromSupabase(){
+  const org=(await sb.from('st_orgs').select('*').eq('id',ME.org_id).single()).data;
+  const profs=(await sb.from('st_profiles').select('*').eq('org_id',ME.org_id)).data||[];
+  const ents=(await sb.from('st_entries').select('*').eq('org_id',ME.org_id)).data||[];
+  const goalRows=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).in('period',['week','month'])).data||[];
+  const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
+  const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
+  const order={admin:0,setter:1,triage:2,closer:3};
+  DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
+      members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
+      entries:{}, goals:{week:((goalRows.find(g=>g.period==='week')||{}).goals)||{}, month:((goalRows.find(g=>g.period==='month')||{}).goals)||{}},
+      sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
+      cuotas:cuotas.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}))};
+  ents.forEach(e=>{ DB.entries[e.member_id+'|'+e.entry_date]=e.metrics||{}; });
+}
 function load(){
   const raw = localStorage.getItem(KEY);
   if(raw){ try{ DB = JSON.parse(raw); return; }catch(e){} }
@@ -431,7 +508,7 @@ function seed(){
   const sales = [
     {id:uid(), date:todayStr(), cliente:'Facundo Guerra', programa:'High Ticket', metodo:'Transferencia', facturado:4000, cash:2000, cuotas:2, reserva:0, closer:'m_nico', triage:'m_vale', setter:'m_facu', fuente:'Instagram'},
   ];
-  return { team:{name:'Camino Digital', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
+  return { team:{name:'Agencia Demo', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
 }
 
 // ---------- Períodos ----------
@@ -513,9 +590,11 @@ const VIEW = document.getElementById('view');
 let state = { view:'dashboard', ptype:'week', ref: todayStr(), capMember:null, capDate:null };
 function go(view){ state.view=view; render(); }
 document.querySelectorAll('.nav-i').forEach(el=>{
+  el.tabIndex=0; el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); el.click(); } });
   el.addEventListener('click',()=>{
     if(el.dataset.action==='theme'){ toggleTheme(); return; }
-    if(el.dataset.action==='reset'){ if(confirm('¿Reiniciar los datos de demo? Se pierde lo cargado en este navegador.')) resetDemo(); return; }
+    if(el.dataset.action==='password'){ openPasswordModal(); return; }
+    if(el.dataset.action==='logout'){ if(confirm('¿Cerrar sesión?')) doLogout(); return; }
     go(el.dataset.view);
   });
 });
@@ -529,6 +608,8 @@ function render(){
   else if(state.view==='team') renderTeam();
   else if(state.view==='goals') renderGoals();
   else if(state.view==='sales') renderSales();
+  else if(state.view==='caja') renderCaja();
+  else if(state.view==='platform') renderPlatform();
   window.scrollTo(0,0);
 }
 
@@ -756,7 +837,18 @@ function buildDrill(spec){
     if(!spec.memberId && spec.num.roles.join()===spec.den.roles.join()) body+=rateMemberTable(A,B);
     body+=dayTableRate(A.byDay,B.byDay);
   }
-  if(spec.memberId){ const m=DB.members.find(x=>x.id===spec.memberId); if(m && m.role==='closer' && m.commission){ const s=sumMember(m.id,P.start,P.end); const cash=s.cash_nuevo||0; const pay=Math.round(m.commission/100*cash); body+=`<div class="dsec"><div class="dh">A cobrar (comisión ${m.commission}%)</div><div class="formula"><span class="ftok"><b>${money(cash)}</b>cash</span><span class="fop">×</span><span class="ftok"><b>${m.commission}%</b></span><span class="fop">=</span><span class="ftok tot"><b>${money(pay)}</b></span></div></div>`; } }
+  if(spec.memberId){ const m=DB.members.find(x=>x.id===spec.memberId); if(m && m.role==='closer' && m.commission){
+    let baseVal, baseHtml;
+    if((DB.team.commission_base||'contador')==='cobrado'){
+      const b=closerPayoutBase(m.id,P.start,P.end); baseVal=b.base;
+      baseHtml=`<span class="ftok"><b>${money(b.front)}</b>front</span><span class="fop">+</span><span class="ftok"><b>${money(b.back)}</b>back</span>`;
+    } else {
+      const s=sumMember(m.id,P.start,P.end); baseVal=s.cash_nuevo||0;
+      baseHtml=`<span class="ftok"><b>${money(baseVal)}</b>cash</span>`;
+    }
+    const pay=Math.round(m.commission/100*baseVal);
+    body+=`<div class="dsec"><div class="dh">A cobrar (comisión ${m.commission}%)</div><div class="formula">${baseHtml}<span class="fop">×</span><span class="ftok"><b>${m.commission}%</b></span><span class="fop">=</span><span class="ftok tot"><b>${money(pay)}</b></span></div></div>`;
+  } }
   return `<div class="drill-head"><div><div class="eyebrow">${esc(P.label)}</div><h3>${esc(spec.label)}</h3></div><div class="drill-val">${headline}</div></div><p class="drill-def">${esc(spec.def||'')}</p>${body}`;
 }
 function openDrill(spec){
@@ -786,29 +878,31 @@ window.closeDrill=closeDrill;
 
 // ---------- Cargar día ----------
 function renderCapture(){
+  if(!IS_ADMIN && ME) state.capMember = ME.id;
   if(!state.capMember || !DB.members.find(m=>m.id===state.capMember)) state.capMember = DB.members[0]?DB.members[0].id:null;
   if(!state.capDate) state.capDate = todayStr();
   const member = DB.members.find(m=>m.id===state.capMember);
   let body='';
   if(!member){ body=`<div class="empty">No hay miembros. Andá a <b>Equipo</b> y agregá al menos uno.</div>`; }
   else {
-    const memberOpts = DB.members.map(m=>`<option value="${m.id}" ${state.capMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
+    const memberOpts = (IS_ADMIN?DB.members:DB.members.filter(m=>m.id===ME.id)).map(m=>`<option value="${m.id}" ${state.capMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
     const key = state.capMember+'|'+state.capDate;
     const cur = DB.entries[key]||{};
     let taps='';
     METRICS[member.role].forEach(mt=>{
       const val = +cur[mt.k]||0;
+      const gb=(state.ghlFill&&state.ghlFill[mt.k])?`<span class="ghl-badge" id="gb_${mt.k}">${state.ghlFill[mt.k]}</span>`:'';
       if(mt.money){
-        taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
+        taps+=`<div class="tap"><div><div class="tl">${mt.label}${gb}</div><div class="def">${mt.def}</div></div>
           <div class="tr"><input class="money-in" type="number" min="0" value="${val}" onchange="setMoney('${mt.k}', this.value)"></div></div>`;
       } else {
-        taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
-          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
+        taps+=`<div class="tap"><div><div class="tl">${mt.label}${gb}</div><div class="def">${mt.def}</div></div>
+          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}" ondblclick="editNum('${mt.k}')" title="Doble clic para escribir el número">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
       }
     });
     const isToday = state.capDate===todayStr();
     body=`<div class="cap-wrap">
-      <div class="cap-intro">
+      <div class="cap-intro" onclick="this.classList.toggle('open')">
         <div class="ico">☝</div>
         <p>Tocá <b>+</b> cada vez que pasa algo (una conversación nueva, una respuesta, un link enviado…). <b>No hay botón de guardar</b>: cada toque se guarda solo al instante. Cargá solo lo que uses; el resto dejalo en 0.</p>
       </div>
@@ -816,6 +910,7 @@ function renderCapture(){
         <select class="chip" onchange="setCapMember(this.value)" data-tip="De quién estás cargando el día.">${memberOpts}</select>
         <input class="chip inp" style="width:auto" type="date" value="${state.capDate}" max="${todayStr()}" onchange="setCapDate(this.value)" data-tip="Podés cargar o corregir cualquier día pasado.">
         <span class="chip"><span class="k">Rol</span> ${ROLE_LABEL[member.role]}</span>
+        ${member.role==='closer' ? `<button class="chip" id="ghlFillBtn" onclick="autofillGhl()" data-tip="Trae lo certero: citas del calendario (llamadas, asistencias, no-shows) y cierres/cash de tus Ventas del día. Revisás y listo.">⚡ Autocompletar</button>` : ''}
         <span class="savepill" id="savePill">✓ Guardado</span>
       </div>
       <div class="taps">${taps}</div>
@@ -831,10 +926,35 @@ function captureSummary(member,key){
   if(member.role==='triage'){ return `asistencia <b>${fmtPct(cur.asistencias,cur.agendadas)}</b>`; }
   return `cierre <b>${fmtPct(cur.cierres,cur.ofertas)}</b>`;
 }
-window.setCapMember=(id)=>{ state.capMember=id; renderCapture(); };
-window.setCapDate=(d)=>{ state.capDate=d||todayStr(); renderCapture(); };
+window.setCapMember=(id)=>{ state.capMember=id; state.ghlFill=null; renderCapture(); };
+window.setCapDate=(d)=>{ state.capDate=d||todayStr(); state.ghlFill=null; renderCapture(); };
+// Badge "GHL/Ventas" desaparece apenas el usuario toca el valor a mano.
+function clearGhlBadge(k){ if(state.ghlFill&&state.ghlFill[k]){ delete state.ghlFill[k]; const b=document.getElementById('gb_'+k); if(b) b.remove(); } }
+// Trae lo certero del día (endpoint /api/capture/ghl) y lo aplica al contador.
+// Nada se persiste acá distinto del flujo normal: save() de siempre.
+window.autofillGhl=async()=>{
+  const btn=document.getElementById('ghlFillBtn'); if(btn){ btn.disabled=true; btn.textContent='Trayendo…'; }
+  const fail=(msg)=>{ if(btn){ btn.disabled=false; btn.textContent='⚡ Autocompletar'; } if(msg) toast(msg); };
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){ fail('Tu sesión venció, volvé a entrar'); return; }
+    const q=new URLSearchParams({date:state.capDate}); if(ME&&state.capMember!==ME.id) q.set('member_id',state.capMember);
+    const r=await fetch('/api/capture/ghl?'+q.toString(),{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(r.status===501){ if(btn) btn.style.display='none'; return; }
+    const j=await r.json().catch(()=>null);
+    if(!r.ok||!j||!j.metrics){ fail((j&&j.error)||'No se pudo traer de GHL, cargá a mano'); return; }
+    const key=state.capMember+'|'+state.capDate;
+    if(!DB.entries[key]) DB.entries[key]={};
+    state.ghlFill={};
+    let n=0;
+    for(const k in j.metrics){ DB.entries[key][k]=+j.metrics[k].value||0; state.ghlFill[k]=j.metrics[k].source==='ghl'?'GHL':'Ventas'; n++; }
+    save(); renderCapture();
+    toast(n?`${n} métricas traídas — revisá y listo, se guardan solas`:'No hay nada certero para traer en este día');
+  }catch(e){ fail('No se pudo traer de GHL, cargá a mano'); }
+};
 function flashSave(){ const p=document.getElementById('savePill'); if(!p) return; p.textContent='✓ Guardado'; p.classList.add('flash'); clearTimeout(flashSave._t); flashSave._t=setTimeout(()=>{p.classList.remove('flash');},700); }
 window.bump=(k,dir)=>{
+  clearGhlBadge(k);
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
   const v=Math.max(0,(+DB.entries[key][k]||0)+dir);
@@ -844,7 +964,32 @@ window.bump=(k,dir)=>{
   const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
   flashSave();
 };
+window.setNum=(k,val)=>{
+  clearGhlBadge(k);
+  const key=state.capMember+'|'+state.capDate;
+  if(!DB.entries[key]) DB.entries[key]={};
+  const v=Math.max(0,Math.round(+val||0));
+  DB.entries[key][k]=v; save();
+  const el=document.getElementById('n_'+k); if(el) el.textContent=v;
+  const member=DB.members.find(m=>m.id===state.capMember);
+  const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
+  flashSave();
+};
+window.editNum=(k)=>{
+  const el=document.getElementById('n_'+k); if(!el||el.querySelector('input')) return;
+  const cur=+el.textContent||0;
+  const inp=document.createElement('input');
+  inp.type='number'; inp.min='0'; inp.value=cur; inp.inputMode='numeric';
+  inp.style.cssText='width:66px;font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;text-align:right;background:var(--surface);color:var(--ink);border:1px solid var(--lima);border-radius:8px;padding:2px 6px;outline:none';
+  el.textContent=''; el.appendChild(inp); inp.focus(); inp.select();
+  let done=false;
+  const commit=()=>{ if(done)return; done=true; setNum(k,Math.max(0,Math.round(+inp.value||0))); };
+  const cancel=()=>{ if(done)return; done=true; el.textContent=cur; };
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();commit();} else if(e.key==='Escape'){cancel();} });
+  inp.addEventListener('blur',commit);
+};
 window.setMoney=(k,val)=>{
+  clearGhlBadge(k);
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
   DB.entries[key][k]=Math.max(0,+val||0); save(); flashSave();
@@ -858,6 +1003,7 @@ function renderTable(){
   let body='';
   if(!member){ body=`<div class="empty">No hay miembros. Andá a <b>Equipo</b> y agregá al menos uno.</div>`; }
   else {
+    const canEdit=IS_ADMIN||(ME&&state.tblMember===ME.id);
     const ref=parseD(state.tblRef); const y=ref.getFullYear(), mo=ref.getMonth();
     const days=new Date(y,mo+1,0).getDate();
     const dayList=[]; for(let d=1;d<=days;d++) dayList.push(dstr(new Date(y,mo,d)));
@@ -872,7 +1018,7 @@ function renderTable(){
     METRICS[member.role].forEach(mt=>{
       let tot=0, cells='';
       dayList.forEach(ds=>{ const key=state.tblMember+'|'+ds; const v=(DB.entries[key]&&+DB.entries[key][mt.k])||0; tot+=v; const isT=ds===T;
-        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)"></td>`; });
+        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)" ${canEdit?'':'readonly'}></td>`; });
       rows+=`<tr><td class="stickyc lbl" data-tip="${esc(mt.def)}">${mt.label}</td>${cells}<td class="tot">${mt.money?money(tot):tot}</td></tr>`;
     });
     // filas derivadas (tasas, read-only)
@@ -933,8 +1079,885 @@ window.tblEdit=(el)=>{
 };
 
 // ---------- Equipo ----------
-function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=sumMember(m.id, r.start, r.end); return Math.round((m.commission||0)/100 * (s.cash_nuevo||0)); }
+// Base "cobrado": front = cash+reserva de SUS ventas del rango (por fecha de venta);
+// back = cuotas de sus ventas COBRADAS en el rango (por fecha real de cobro, monto real).
+function closerPayoutBase(memberId, start, end){
+  const front=DB.sales.filter(s=>s.closer===memberId && s.date>=start && s.date<=end)
+    .reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const mySales=new Set(DB.sales.filter(s=>s.closer===memberId).map(s=>s.id));
+  const back=(DB.cuotas||[]).filter(c=>c.status==='pagada' && c.paid_date && c.paid_date>=start && c.paid_date<=end && mySales.has(c.sale_id))
+    .reduce((a,c)=>a+(+c.paid_amount||0),0);
+  return {front, back, base:front+back};
+}
+function closerPayout(m){
+  const r=range('month', parseD(todayStr()));
+  if((DB.team.commission_base||'contador')==='cobrado'){
+    return Math.round((m.commission||0)/100 * closerPayoutBase(m.id, r.start, r.end).base);
+  }
+  const s=sumMember(m.id, r.start, r.end);
+  return Math.round((m.commission||0)/100 * (s.cash_nuevo||0));
+}
+
+// ---------- Integración HighLevel ----------
+// Estado de la conexión GHL de la org (null = todavía no se consultó a la API).
+let GHL_STATUS=null, GHL_LOADING=false;
+// Flag del retorno OAuth con ?ghl_error=location_mismatch: el admin autorizó
+// una subcuenta distinta a la pre-asignada (se muestra banner en ghlCard).
+let GHL_MISMATCH=false;
+// Calendarios elegibles para "Calendario de llamadas" (null = todavía no se
+// consultó; objeto = respuesta del GET {calendars, selected, selected_name, hint?}
+// o {error:true, msg} si falló).
+let GHL_CALS=null, GHL_CALS_LOADING=false;
+async function loadGhlStatus(){
+  if(!IS_ADMIN || GHL_LOADING) return;
+  GHL_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ GHL_STATUS={connected:false,error:true}; return; }
+    const res=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    GHL_STATUS=(res.ok && data) ? data : {connected:false,error:true};
+  }catch(e){ GHL_STATUS={connected:false,error:true}; }
+  finally{ GHL_LOADING=false; if(state.view==='team') renderTeam(); }
+}
+// Carga lazy de los calendarios elegibles (mismo patrón que loadGhlStatus).
+async function loadGhlCalendars(){
+  if(!IS_ADMIN || GHL_CALS_LOADING) return;
+  GHL_CALS_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ GHL_CALS={error:true,msg:''}; return; }
+    const res=await fetch('/api/ghl/calendars',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    GHL_CALS=(res.ok && data) ? data : {error:true, msg:(data&&data.error)||''};
+  }catch(e){ GHL_CALS={error:true,msg:''}; }
+  finally{ GHL_CALS_LOADING=false; if(state.view==='team') renderTeam(); }
+}
+// Sub-bloque "Calendario de llamadas" de la card conectada (solo admin).
+function ghlCalendarBlock(){
+  let inner='';
+  if(GHL_CALS===null){
+    loadGhlCalendars();
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando calendarios…</p>`;
+  } else if(GHL_CALS.error){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.msg||'No se pudieron cargar los calendarios. Recargá la página para reintentar.')}</p>`;
+  } else if(!(GHL_CALS.calendars||[]).length){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.hint||'Importá primero a tus closers desde Equipo desde HighLevel')}</p>`;
+  } else {
+    const opts=['<option value="">— Sin configurar —</option>']
+      .concat(GHL_CALS.calendars.map(c=>`<option value="${esc(c.id)}" ${GHL_CALS.selected===c.id?'selected':''}>${esc(c.name)}${(c.closers&&c.closers.length)?' · '+esc(c.closers.join(', ')):''}</option>`))
+      .join('');
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0 0 8px">De acá salen los leads con cita para asociar ventas.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="ghl-cal-select" class="chip">${opts}</select>
+        <button class="btn sm" onclick="saveGhlCalendar()">Guardar</button>
+      </div>`;
+  }
+  return `<div style="border-top:1px solid var(--line);padding-top:12px;margin:0 0 12px">
+    <b style="font-size:13px;display:block;margin:0 0 6px">Calendario de llamadas</b>${inner}</div>`;
+}
+function ghlCard(){
+  if(!IS_ADMIN) return '';
+  let body='';
+  if(GHL_STATUS===null){
+    loadGhlStatus();
+    body=`<p style="color:var(--muted);font-size:13px;margin:0">Verificando conexión…</p>`;
+  } else if(GHL_STATUS.error){
+    body=`<p style="color:var(--muted);font-size:13px;margin:0">No se pudo consultar el estado de la integración. Recargá la página para reintentar.</p>`;
+  } else if(GHL_STATUS.connected){
+    const fecha=GHL_STATUS.connected_at ? new Date(GHL_STATUS.connected_at).toLocaleDateString('es-AR',{day:'numeric',month:'short',year:'numeric'}) : '';
+    body=`<p style="font-size:13.5px;margin:0 0 12px">✅ Conectado a <b>${esc(GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta')}</b>${fecha?` <span style="color:var(--muted)">· desde el ${fecha}</span>`:''}</p>
+      ${ghlCalendarBlock()}
+      <button class="btn danger sm" onclick="disconnectGhl()">Desconectar</button>`;
+  } else if(GHL_STATUS.pending){
+    // Subcuenta pre-asignada desde Plataforma: falta que el admin autorice el OAuth.
+    const locName=GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta';
+    const mismatchBox=GHL_MISMATCH
+      ? `<div class="admin-lock">⚠️ <span>Autorizaste otra subcuenta. Tenés que elegir <b>${esc(locName)}</b>.</span></div>`
+      : '';
+    body=`${mismatchBox}<p style="font-size:13.5px;margin:0 0 12px">Subcuenta asignada: <b>${esc(locName)}</b> — falta autorizar la conexión</p>
+      <button class="btn" onclick="connectGhl()">Conectar con HighLevel</button>`;
+  } else {
+    body=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Conectá tu subcuenta de HighLevel para que el tracker cargue actividad automáticamente. Sin conexión, la carga manual sigue funcionando igual.</p>
+      <button class="btn" onclick="connectGhl()">Conectar con HighLevel</button>`;
+  }
+  return `<div class="section"><div class="eyebrow">Integración HighLevel</div>${body}</div>`;
+}
+window.connectGhl=async ()=>{
+  if(!IS_ADMIN) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  location.href='/api/oauth/start?token='+encodeURIComponent(session.access_token);
+};
+window.disconnectGhl=async ()=>{
+  if(!IS_ADMIN) return;
+  if(!confirm('¿Desconectar HighLevel? La carga manual sigue funcionando.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/integrations/ghl',{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_CALS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; renderTeam(); }
+  else{ toast(data.error || 'No se pudo desconectar'); }
+};
+window.saveGhlCalendar=async ()=>{
+  if(!IS_ADMIN) return;
+  const sel=document.getElementById('ghl-cal-select');
+  const valor=sel?sel.value:'';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/integrations/ghl/calendar',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+session.access_token,'Content-Type':'application/json'},
+      body:JSON.stringify({calendar_id: valor || null}),
+    });
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    if(GHL_CALS && !GHL_CALS.error){ GHL_CALS.selected=valor||null; GHL_CALS.selected_name=data.calendar_name||null; }
+    toast(valor ? 'Calendario guardado' : 'Calendario sin configurar');
+    renderTeam();
+  } else {
+    toast(data.error || 'No se pudo guardar el calendario');
+  }
+};
+
+// ---------- Equipo desde HighLevel (Fase 2) ----------
+// Lista de usuarios de la subcuenta GHL (null = todavía no se cargó) + bajas y
+// auto-vinculaciones de la última reconciliación. Solo visible para el admin con org conectada.
+let GHL_USERS=null, GHL_USERS_LOADING=false, GHL_REMOVED=[], GHL_AUTO_LINKED=[];
+const GHL_STATUS_CHIP={nuevo:['Nuevo','st-nuevo'],vinculable:['Vinculable','st-vinculable'],importado:['Importado','st-importado'],inactivo:['Inactivo','st-inactivo']};
+const GHL_STATUS_ACTION={nuevo:'Importar',vinculable:'Vincular',inactivo:'Reactivar'};
+function ghlTeamCard(){
+  if(!IS_ADMIN || !GHL_STATUS || !GHL_STATUS.connected) return '';
+  // (a) Código de acceso del equipo = Location ID (contraseña inicial).
+  const codeBox=`<div class="ghl-code">
+    <div>
+      <div class="ghl-code-val">${esc(GHL_STATUS.location_id||'')}</div>
+      <p class="ghl-code-txt">Cada miembro entra con su email de HighLevel y este código como contraseña inicial. Después puede cambiarla desde la app.</p>
+    </div>
+    <button class="btn ghost sm" onclick="copyGhlAccessCode()">Copiar</button>
+  </div>`;
+  // (c) Aviso de bajas automáticas (GHL manda).
+  let removedBox='';
+  if(GHL_REMOVED.length){
+    const n=GHL_REMOVED.length;
+    removedBox=`<div class="admin-lock">⚠️ <span>Se ${n===1?'dio de baja 1 miembro que ya no está':'dieron de baja '+n+' miembros que ya no están'} en HighLevel: <b>${GHL_REMOVED.map(x=>esc(x)).join(', ')}</b></span></div>`;
+  }
+  // (c2) Aviso de auto-vinculaciones por email (reconciliación total).
+  let autoLinkedBox='';
+  if(GHL_AUTO_LINKED.length){
+    const n=GHL_AUTO_LINKED.length;
+    autoLinkedBox=`<div class="admin-lock">🔗 <span>Se ${n===1?'vinculó automáticamente':'vincularon automáticamente'} con su usuario de HighLevel: <b>${GHL_AUTO_LINKED.map(x=>esc(x)).join(', ')}</b></span></div>`;
+  }
+  // (b) Botón de carga / tabla de usuarios GHL.
+  const loadBtn=(cls)=>`<button class="btn ${cls}" onclick="loadGhlUsers()" ${GHL_USERS_LOADING?'disabled':''}>${GHL_USERS_LOADING?'Cargando…':(GHL_USERS===null?'Cargar usuarios de HighLevel':'Actualizar lista')}</button>`;
+  let listBox='';
+  if(GHL_USERS===null){
+    listBox=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Traé los usuarios de tu subcuenta y elegí a quiénes importar como miembros del tracker, con el rol que les corresponda.</p>${loadBtn('')}`;
+  } else if(!GHL_USERS.length){
+    listBox=`<div class="empty">Tu subcuenta de HighLevel no tiene usuarios.</div><div style="margin-top:10px">${loadBtn('ghost sm')}</div>`;
+  } else {
+    const roleOpt=(r)=>r==='admin'?'Admin':ROLE_LABEL[r];
+    const rows=GHL_USERS.map(u=>{
+      const [chipLbl,chipCls]=GHL_STATUS_CHIP[u.status]||[u.status,''];
+      const roleSel=u.status==='importado'?'':`<select class="inp cfg-role" id="ghlrole_${esc(u.ghl_user_id)}">${['setter','triage','closer','admin'].map(r=>`<option value="${r}" ${r==='setter'?'selected':''}>${roleOpt(r)}</option>`).join('')}</select>`;
+      const action=u.status==='importado'
+        ? `<span class="ghl-ok" data-tip="Ya es miembro del tracker">✓</span>`
+        : `<button class="btn sm" onclick="importGhlUser('${esc(u.ghl_user_id)}')">${GHL_STATUS_ACTION[u.status]||'Importar'}</button>`;
+      return `<tr>
+        <td style="text-align:left">${esc(u.name||'—')}</td>
+        <td style="text-align:left">${esc(u.email||'—')}</td>
+        <td style="text-align:left"><span class="pill ${chipCls}">${esc(chipLbl)}</span></td>
+        <td style="text-align:left">${roleSel}</td>
+        <td>${action}</td>
+      </tr>`;
+    }).join('');
+    listBox=`<div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Nombre</th><th style="text-align:left">Email</th><th style="text-align:left">Estado</th><th style="text-align:left">Rol en el tracker</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div style="margin-top:10px">${loadBtn('ghost sm')}</div>`;
+  }
+  return `<div class="section"><div class="eyebrow">Equipo desde HighLevel</div>${codeBox}${autoLinkedBox}${removedBox}${listBox}</div>`;
+}
+window.copyGhlAccessCode=async ()=>{
+  const code=(GHL_STATUS&&GHL_STATUS.location_id)||'';
+  if(!code) return;
+  try{
+    await navigator.clipboard.writeText(code);
+  }catch(e){
+    // Fallback para contextos sin Clipboard API (http, browsers viejos).
+    const ta=document.createElement('textarea');
+    ta.value=code; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(err){}
+    document.body.removeChild(ta);
+  }
+  toast('Código copiado');
+};
+window.loadGhlUsers=async ()=>{
+  if(!IS_ADMIN || GHL_USERS_LOADING) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  GHL_USERS_LOADING=true;
+  if(state.view==='team') renderTeam();
+  let res, data;
+  try{
+    res=await fetch('/api/ghl/users',{headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    GHL_USERS_LOADING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='team') renderTeam();
+    return;
+  }
+  GHL_USERS_LOADING=false;
+  if(res.ok){
+    GHL_USERS=data.users||[];
+    GHL_REMOVED=data.removed||[];
+    GHL_AUTO_LINKED=data.auto_linked||[];
+    // Bajas y auto-vinculaciones cambian el equipo local: recargar miembros.
+    if(GHL_REMOVED.length || GHL_AUTO_LINKED.length) await loadFromSupabase();
+  } else {
+    toast(data.error || 'No se pudo cargar la lista de HighLevel');
+  }
+  if(state.view==='team') renderTeam();
+};
+window.importGhlUser=async (ghlUserId)=>{
+  if(!IS_ADMIN) return;
+  const sel=document.getElementById('ghlrole_'+ghlUserId);
+  const role=(sel&&sel.value)||'setter';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/ghl/users/import',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({ghl_user_id:ghlUserId, role})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    if(data.existing_account){
+      // Ya tenía cuenta en el auth compartido: NO entra con el código de acceso.
+      toast('Importado. Ojo: ya tenía cuenta, entra con su contraseña de siempre (no con el código de acceso)', 7000);
+    } else {
+      toast(data.reactivated?'Reactivado':(data.linked?'Vinculado':'Importado'));
+    }
+    await loadFromSupabase();   // refresca el equipo local
+    await loadGhlUsers();       // refresca los estados de la tabla
+  } else {
+    toast(data.error || 'No se pudo importar');
+  }
+};
+
+// ---------- Cambiar mi contraseña (cualquier usuario logueado) ----------
+// Modal lazy con el patrón del drill-overlay: fondo oscuro, card centrada,
+// click afuera o ✕ cierran. El cambio real lo hace la mini-API (/api/me/password).
+function openPasswordModal(){
+  let ov=document.getElementById('pwOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='pwOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closePasswordModal(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closePasswordModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Tu cuenta</div><h3>Cambiar mi contraseña</h3></div></div>
+    <p class="drill-def">Mínimo 8 caracteres. La vas a usar la próxima vez que entres.</p>
+    <form onsubmit="return submitPassword(event)">
+      <input class="inp" id="pw_new" type="password" placeholder="Nueva contraseña" autocomplete="new-password" required style="margin:8px 0 10px">
+      <input class="inp" id="pw_conf" type="password" placeholder="Repetir contraseña" autocomplete="new-password" required style="margin-bottom:16px">
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closePasswordModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="pw_btn">Guardar</button>
+      </div>
+    </form>
+  </div>`;
+  ov.style.display='flex';
+  const inp=document.getElementById('pw_new'); if(inp) inp.focus();
+}
+function closePasswordModal(){ const ov=document.getElementById('pwOv'); if(ov) ov.style.display='none'; }
+window.openPasswordModal=openPasswordModal;
+window.closePasswordModal=closePasswordModal;
+window.submitPassword=async (ev)=>{
+  ev.preventDefault();
+  const pass=document.getElementById('pw_new').value;
+  const conf=document.getElementById('pw_conf').value;
+  if(pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return false; }
+  if(pass!==conf){ toast('Las contraseñas no coinciden'); return false; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return false; }
+  const btn=document.getElementById('pw_btn');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  let res, data;
+  try{
+    res=await fetch('/api/me/password',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({password:pass})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast('No se pudo conectar con el servidor');
+    return false;
+  }
+  if(res.ok){ toast('Contraseña actualizada'); closePasswordModal(); }
+  else{
+    if(btn){ btn.disabled=false; btn.textContent='Guardar'; }
+    toast(data.error || 'No se pudo cambiar la contraseña');
+  }
+  return false;
+};
+
+// ---------- Plataforma (SOLO super-admins de Maze) ----------
+// IS_SUPER: se resuelve en boot() con un fetch a /api/platform/settings —
+// 200 = super-admin (se muestra el ítem del rail); cualquier otro status o
+// error de red = queda oculto, silencioso (fail-closed; la seguridad real es
+// server-side, el rail es solo cosmética).
+// PLAT_SETTINGS: respuesta de GET /api/platform/settings — {agency_pit_set,
+// agency_pit_hint}. Solo el hint de 4 chars: el token completo jamás llega.
+let IS_SUPER=false, PLAT_SETTINGS=null;
+// ORGS_ALLOWED: null = todavía no se consultó, false = 401/403 u otro error
+// (fail-closed), true = super-admin confirmado por /api/orgs.
+// ORG_CREATED: credenciales del último alta — viven SOLO en memoria hasta que
+// se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
+let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
+// Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
+// resultados de la última búsqueda (para pickear por índice sin inyectar
+// datos de GHL en atributos onclick) + timer del debounce + estado del
+// combobox (total server, índice highlighteado, abierto, listener de document).
+let PLAT_LOC_SEL=null, PLAT_LOC_RESULTS=[], _locT;
+let PLAT_LOC_TOTAL=0, PLAT_LOC_HL=-1, PLAT_LOC_OPEN=false, _locDocL=null;
+// Panel "Gestionar" por org: PLAT_M_ORG = id de la org con panel abierto (una
+// a la vez), PLAT_MEMBERS = miembros cargados del panel (null = cargando).
+// Las acciones del panel van SIEMPRE por índice sobre PLAT_MEMBERS — jamás
+// datos de usuario en atributos onclick.
+let PLAT_M_ORG=null, PLAT_MEMBERS=null, PLAT_M_LOADING=false, ADMIN_CREATING=false;
+// Iniciales de las dos primeras palabras (avatar del combobox); fallback '?'.
+function locInitials(name){
+  const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return '?';
+  return parts.slice(0,2).map(p=>p[0]).join('').toUpperCase();
+}
+function locShortId(id){ return String(id||'').slice(0,8); }
+async function loadOrgs(){
+  if(ORGS_LOADING) return;
+  ORGS_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ ORGS_ALLOWED=false; return; }
+    const res=await fetch('/api/orgs',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    if(res.ok && data){ ORGS=data.orgs||[]; ORGS_ALLOWED=true; }
+    // 401/403 y cualquier otro error → fail-closed, silencioso.
+    else{ ORGS_ALLOWED=false; }
+  }catch(e){ ORGS_ALLOWED=false; }
+  finally{ ORGS_LOADING=false; if(state.view==='platform') renderPlatform(); }
+}
+function orgsCard(){
+  // La vista entera ya es solo super-admin (renderPlatform guarda con IS_SUPER),
+  // pero si /api/orgs falló se avisa en vez de reintentar en loop.
+  if(ORGS_ALLOWED===false) return `<div class="section"><div class="eyebrow">Organizaciones</div><p style="color:var(--muted);font-size:13px;margin:0">No se pudieron cargar las organizaciones. Recargá la página para reintentar.</p></div>`;
+  if(ORGS===null){ loadOrgs(); return `<div class="section"><div class="eyebrow">Organizaciones</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando…</p></div>`; }
+  // (a) Box de credenciales del último alta (un solo uso).
+  let credBox='';
+  if(ORG_CREATED){
+    const passHtml = ORG_CREATED.existing
+      ? `<div style="font-size:13px;margin-top:3px">Ya tenía cuenta — entra con su contraseña de siempre</div>`
+      : (ORG_CREATED.password ? `<div style="font-size:13px;margin-top:3px">Contraseña: <span class="ghl-code-val" style="font-size:14px">${esc(ORG_CREATED.password)}</span></div>` : '');
+    credBox=`<div class="ghl-code" style="align-items:flex-start">
+      <div>
+        <b style="font-size:13.5px">${esc(ORG_CREATED.name)}</b>
+        <div style="font-size:13px;margin-top:6px">URL: <span class="ghl-code-val" style="font-size:14px">${esc(location.origin)}</span></div>
+        <div style="font-size:13px;margin-top:3px">Email: <span class="ghl-code-val" style="font-size:14px">${esc(ORG_CREATED.email)}</span></div>
+        ${passHtml}
+        <p class="ghl-code-txt" style="margin-top:8px">⚠️ Guardá estas credenciales ahora: no se vuelven a mostrar.</p>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn ghost sm" onclick="copyOrgCreds()">Copiar</button>
+        <button class="btn ghost sm" onclick="closeOrgCreds()" data-tip="Cerrar (las credenciales no se vuelven a mostrar)">✕</button>
+      </div>
+    </div>`;
+  }
+  // (b) Tabla de organizaciones.
+  let tableBox='';
+  if(!(ORGS||[]).length){
+    tableBox=`<div class="empty">Sin organizaciones todavía.</div>`;
+  } else {
+    const rows=ORGS.map((o,i)=>{
+      let tr=`<tr>
+      <td style="text-align:left">${esc(o.name||'—')}</td>
+      <td>${+o.members_active||0}</td>
+      <td style="text-align:left">${o.ghl_connected?esc(o.ghl_location_name||'Conectado'):'—'}</td>
+      <td style="text-align:left">${(o.admins&&o.admins.length)?o.admins.map(a=>esc(a)).join(', '):'—'}</td>
+      <td><button class="btn ghost sm" onclick="toggleOrgPanel(${i})">${o.id===PLAT_M_ORG?'Cerrar':'Gestionar'}</button></td>
+    </tr>`;
+      // Panel expandible debajo de la fila (una org a la vez). colspan = total
+      // de columnas del thead (5).
+      if(o.id===PLAT_M_ORG) tr+=`<tr><td colspan="5" style="text-align:left">${orgPanelHtml()}</td></tr>`;
+      return tr;
+    }).join('');
+    tableBox=`<div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Nombre</th><th>Miembros</th><th style="text-align:left">HighLevel</th><th style="text-align:left">Admins</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+  // (c) Form de alta, con buscador de subcuenta de la agencia (opcional).
+  // Si hay subcuenta elegida → chip fijado con ✕; si no → input con debounce
+  // que pinta SOLO #platLocResults (nunca re-render completo: se pierde el foco).
+  const locField=PLAT_LOC_SEL
+    ? `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+        <div><button class="chip" type="button" onclick="clearPlatLoc()" data-tip="Quitar la subcuenta elegida"><span class="cbx-ava" style="width:22px;height:22px;font-size:10px">${esc(locInitials(PLAT_LOC_SEL.name))}</span> ${esc(PLAT_LOC_SEL.name)} <span class="k">${esc(locShortId(PLAT_LOC_SEL.id))}</span> ✕</button></div>
+      </div>`
+    : `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+        <div class="cbx-wrap" id="platLocWrap">
+          <input class="inp" id="platLocQ" placeholder="Buscar subcuenta de tu agencia…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" oninput="platLocSearch(this.value)" onfocus="platLocFocus()" onkeydown="platLocKey(event)">
+          <div class="cbx-panel" id="platLocResults" role="listbox" style="display:none"></div>
+        </div>
+      </div>`;
+  const form=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px">
+    <b style="font-size:13px;display:block;margin:0 0 8px">Nueva organización</b>
+    <div class="grid2">
+      <div class="field"><label>Nombre de la organización</label><input class="inp" id="orgName" placeholder="Ej: Camino Digital"></div>
+      <div class="field"><label>Nombre del admin</label><input class="inp" id="orgAdminName" placeholder="Ej: Clara"></div>
+      <div class="field"><label>Email del admin</label><input class="inp" id="orgAdminEmail" type="email" placeholder="admin@email.com"></div>
+      <div class="field"><label>Contraseña</label><input class="inp" id="orgAdminPass" type="text" placeholder="dejá vacío para autogenerar"></div>
+      ${locField}
+    </div>
+    <button class="btn" onclick="createOrg()" ${ORG_CREATING?'disabled':''}>${ORG_CREATING?'Creando…':'Crear organización'}</button>
+  </div>`;
+  return `<div class="section"><div class="eyebrow">Organizaciones</div>${credBox}${tableBox}${form}</div>`;
+}
+// Combobox de subcuentas: el foco abre el panel (q vacío = explorar todas —
+// el cache server de 5 min lo hace barato); tipear usa debounce 400ms → GET
+// /api/platform/locations?q= → pinta SOLO #platLocResults (nunca re-render
+// completo: se pierde el foco del input). Todo dato de GHL pasa por esc()
+// antes del innerHTML; click/Enter se resuelven por índice sobre
+// PLAT_LOC_RESULTS (jamás se inyectan name/id de GHL en un atributo onclick).
+async function platLocFetch(q){
+  const box=document.getElementById('platLocResults');
+  if(!box) return;
+  box.style.display='';
+  box.innerHTML=`<div class="empty" style="padding:10px">Buscando…</div>`;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/platform/locations?q='+encodeURIComponent(q||''),{headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ box.innerHTML=`<div class="empty" style="padding:10px">No se pudo conectar con el servidor</div>`; return; }
+  if(!res.ok){
+    // 409 = falta configurar el token de agencia: mostrar el error del backend como hint.
+    box.innerHTML=`<div class="empty" style="padding:10px">${esc(data.error||'No se pudieron buscar las subcuentas')}</div>`;
+    return;
+  }
+  const locs=data.locations||[];
+  PLAT_LOC_TOTAL=data.total ?? locs.length;
+  // Vinculadas AL FINAL (estable: libres primero en su orden, vinculadas después).
+  // El índice de click/Enter apunta a ESTE array reordenado.
+  PLAT_LOC_RESULTS=[...locs.filter(l=>!l.linked_org), ...locs.filter(l=>l.linked_org)];
+  PLAT_LOC_HL=PLAT_LOC_RESULTS.findIndex(l=>!l.linked_org); // -1 si no hay seleccionables
+  platLocPaint();
+}
+window.platLocSearch=(q)=>{ clearTimeout(_locT); _locT=setTimeout(()=>platLocFetch(q),400); };
+function platLocPaint(){
+  const box=document.getElementById('platLocResults');
+  if(!box) return;
+  box.style.display='';
+  if(!PLAT_LOC_RESULTS.length){ box.innerHTML=`<div class="empty" style="padding:10px">No hay subcuentas que coincidan</div>`; return; }
+  const n=PLAT_LOC_RESULTS.length;
+  const hint=PLAT_LOC_TOTAL>n?' — seguí escribiendo para afinar':'';
+  const head=`<div class="cbx-head">Mostrando ${n} de ${PLAT_LOC_TOTAL} subcuentas${hint}</div>`;
+  box.innerHTML=head+PLAT_LOC_RESULTS.map((l,i)=>{
+    const ava=`<span class="cbx-ava">${esc(locInitials(l.name))}</span>`;
+    const meta=[l.city,l.country,locShortId(l.id)].filter(Boolean).join(' · ');
+    const col=`<div><div class="cbx-name">${esc(l.name)}</div>${meta?`<div class="cbx-meta">${esc(meta)}</div>`:''}</div>`;
+    if(l.linked_org){
+      return `<div class="cbx-item off" id="cbxi-${i}">${ava}${col}<span class="cbx-badge">vinculada a ${esc(l.linked_org)}</span></div>`;
+    }
+    return `<div class="cbx-item${i===PLAT_LOC_HL?' hl':''}" id="cbxi-${i}" role="option" onclick="pickPlatLoc(${i})">${ava}${col}</div>`;
+  }).join('');
+}
+window.platLocFocus=()=>{
+  const box=document.getElementById('platLocResults'), inp=document.getElementById('platLocQ');
+  if(!box||!inp) return;
+  PLAT_LOC_OPEN=true;
+  box.style.display='';
+  inp.setAttribute('aria-expanded','true');
+  platLocFetch(inp.value||''); // sin debounce: explorar de inmediato al foco
+  if(!_locDocL){
+    _locDocL=(e)=>{ const w=document.getElementById('platLocWrap'); if(!w||!w.contains(e.target)) platLocClose(); };
+    document.addEventListener('pointerdown',_locDocL);
+  }
+};
+window.platLocClose=()=>{
+  const box=document.getElementById('platLocResults'), inp=document.getElementById('platLocQ');
+  if(box) box.style.display='none';
+  if(inp) inp.setAttribute('aria-expanded','false');
+  PLAT_LOC_OPEN=false; PLAT_LOC_HL=-1;
+  // Cleanup obligatorio: nunca acumular listeners entre aperturas/re-renders.
+  if(_locDocL){ document.removeEventListener('pointerdown',_locDocL); _locDocL=null; }
+};
+window.platLocKey=(e)=>{
+  if(!PLAT_LOC_OPEN){ if(e.key==='ArrowDown'){ e.preventDefault(); platLocFocus(); } return; }
+  if(e.key==='Escape'){ platLocClose(); return; }
+  if(e.key==='Enter'){ e.preventDefault(); if(PLAT_LOC_HL>=0) pickPlatLoc(PLAT_LOC_HL); return; }
+  if(e.key!=='ArrowDown' && e.key!=='ArrowUp') return;
+  e.preventDefault();
+  // Las vinculadas están al final: el rango seleccionable es el prefijo [0, lastFree].
+  let lastFree=-1;
+  for(let i=0;i<PLAT_LOC_RESULTS.length;i++){ if(!PLAT_LOC_RESULTS[i].linked_org) lastFree=i; else break; }
+  if(lastFree<0) return;
+  if(PLAT_LOC_HL<0) PLAT_LOC_HL=0;
+  else if(e.key==='ArrowDown') PLAT_LOC_HL=Math.min(PLAT_LOC_HL+1,lastFree); // tope, sin wrap
+  else PLAT_LOC_HL=Math.max(PLAT_LOC_HL-1,0);
+  platLocPaint();
+  const el=document.getElementById('cbxi-'+PLAT_LOC_HL);
+  if(el) el.scrollIntoView({block:'nearest'});
+};
+window.pickPlatLoc=(i)=>{
+  const l=PLAT_LOC_RESULTS[i];
+  if(!l || l.linked_org) return;
+  PLAT_LOC_SEL={id:l.id, name:l.name};
+  platLocClose(); // limpia el listener de document ANTES del re-render (que destruye el panel)
+  renderPlatform();
+};
+window.clearPlatLoc=()=>{ PLAT_LOC_SEL=null; renderPlatform(); };
+window.createOrg=async ()=>{
+  if(ORG_CREATING) return;
+  const name=(document.getElementById('orgName').value||'').trim();
+  const adminName=(document.getElementById('orgAdminName').value||'').trim();
+  const adminEmail=(document.getElementById('orgAdminEmail').value||'').trim();
+  const pass=(document.getElementById('orgAdminPass').value||'').trim();
+  if(!name){ toast('Tienes que poner el nombre de la organización'); return; }
+  if(!adminName){ toast('Tienes que poner el nombre del admin'); return; }
+  if(!adminEmail){ toast('Tienes que poner el email del admin'); return; }
+  if(pass && pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  ORG_CREATING=true;
+  if(state.view==='platform') renderPlatform();
+  const body={name, admin_name:adminName, admin_email:adminEmail};
+  if(pass) body.admin_password=pass;
+  if(PLAT_LOC_SEL) body.location_id=PLAT_LOC_SEL.id;
+  let res, data;
+  try{
+    res=await fetch('/api/orgs',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    ORG_CREATING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='platform') renderPlatform();
+    return;
+  }
+  ORG_CREATING=false;
+  if(res.ok){
+    // La contraseña vive SOLO acá (memoria) hasta cerrar el box — jamás en
+    // localStorage ni en logs.
+    ORG_CREATED={ name:(data.org&&data.org.name)||name, email:data.admin_email||adminEmail, password:data.admin_password||null, existing:!!data.existing_account };
+    PLAT_LOC_SEL=null;
+    // Si el pre-vínculo de la subcuenta falló, el backend lo avisa con warning
+    // (la org igual se creó).
+    if(data.warning){ toast('Organización creada. '+data.warning, 7000); }
+    else{ toast('Organización creada'); }
+    // Refrescar la tabla re-disparando el fetch. El box ORG_CREATED sobrevive
+    // al refresh porque es estado aparte.
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error || 'No se pudo crear la organización');
+    if(state.view==='platform') renderPlatform();
+  }
+};
+window.copyOrgCreds=async ()=>{
+  if(!ORG_CREATED) return;
+  const lines=[location.origin, ORG_CREATED.email];
+  if(ORG_CREATED.password) lines.push(ORG_CREATED.password);
+  const text=lines.join('\n');
+  try{
+    await navigator.clipboard.writeText(text);
+  }catch(e){
+    // Fallback para contextos sin Clipboard API (http, browsers viejos).
+    const ta=document.createElement('textarea');
+    ta.value=text; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(err){}
+    document.body.removeChild(ta);
+  }
+  toast('Credenciales copiadas');
+};
+window.closeOrgCreds=()=>{ ORG_CREATED=null; if(state.view==='platform') renderPlatform(); };
+
+// ---------- Panel "Gestionar" por org (miembros + roles + admins) ----------
+// Abre/cierra el panel de una org (por índice sobre ORGS, patrón pickPlatLoc).
+window.toggleOrgPanel=(i)=>{
+  const o=ORGS&&ORGS[i];
+  if(!o) return;
+  if(PLAT_M_ORG===o.id){ PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  else{ PLAT_M_ORG=o.id; PLAT_MEMBERS=null; loadOrgMembers(); }
+  if(state.view==='platform') renderPlatform();
+};
+async function loadOrgMembers(){
+  if(PLAT_M_LOADING||!PLAT_M_ORG) return;
+  PLAT_M_LOADING=true;
+  const orgId=PLAT_M_ORG;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ toast('Tu sesión venció, vuelve a entrar'); PLAT_M_ORG=null; PLAT_MEMBERS=null; return; }
+    const res=await fetch('/api/orgs/'+encodeURIComponent(orgId)+'/members',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>({}));
+    if(PLAT_M_ORG!==orgId) return; // se cerró/cambió de org mientras cargaba
+    if(res.ok){ PLAT_MEMBERS=data.members||[]; }
+    else{ toast(data.error||'No se pudieron cargar los miembros'); PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  }catch(e){
+    if(PLAT_M_ORG===orgId){ toast('No se pudo conectar con el servidor'); PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  }
+  finally{ PLAT_M_LOADING=false; if(state.view==='platform') renderPlatform(); }
+}
+// HTML del panel: lista de miembros (avatar, email, badges, select de rol,
+// activar/desactivar) + mini-form de alta de admin. Todo dato dinámico pasa
+// por esc(); las acciones van por índice sobre PLAT_MEMBERS.
+function orgPanelHtml(){
+  let list='';
+  if(PLAT_MEMBERS===null){
+    list=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando…</p>`;
+  } else if(!PLAT_MEMBERS.length){
+    list=`<div class="empty">Sin miembros todavía.</div>`;
+  } else {
+    list=PLAT_MEMBERS.map((m,idx)=>{
+      // Options con valores de un array literal fijo (jamás datos de usuario).
+      const roleSel=`<select class="inp" style="width:auto" onchange="changeMemberRole(${idx}, this.value)">${['admin','setter','triage','closer'].map(r=>`<option value="${r}"${m.role===r?' selected':''}>${r}</option>`).join('')}</select>`;
+      const actBtn=(m.active!==false)
+        ? `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Desactivar</button>`
+        : `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Reactivar</button>`;
+      // "Entrar como": solo miembros activos (la API igual rechaza inactivos).
+      const loginBtn=(m.active!==false)
+        ? `<button class="btn ghost sm" onclick="loginAsMember(${idx})">Entrar como</button>`
+        : '';
+      const badges=`${m.ghl?'<span class="tag ok">GHL</span>':'<span class="tag">Manual</span>'}${(m.active!==false)?'':' <span class="tag warn">Inactivo</span>'}`;
+      return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span class="cbx-ava">${esc(locInitials(m.name))}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px"><b>${esc(m.name||'—')}</b> ${badges}</div>
+          <div style="color:var(--muted);font-size:12.5px">${esc(m.email||'—')}</div>
+        </div>
+        ${roleSel}
+        ${loginBtn}
+        ${actBtn}
+      </div>`;
+    }).join('');
+  }
+  const form=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+    <b style="font-size:13px;display:block;margin:0 0 8px">Agregar admin</b>
+    <div class="grid2">
+      <div class="field"><label>Nombre</label><input class="inp" id="orgAdmName" placeholder="Ej: Clara"></div>
+      <div class="field"><label>Email</label><input class="inp" id="orgAdmEmail" type="email" placeholder="admin@email.com"></div>
+      <div class="field"><label>Contraseña</label><input class="inp" id="orgAdmPass" type="text" placeholder="dejá vacío para autogenerar"></div>
+    </div>
+    <button class="btn sm" onclick="addOrgAdmin()" ${ADMIN_CREATING?'disabled':''}>${ADMIN_CREATING?'Agregando…':'Agregar admin'}</button>
+  </div>`;
+  const danger=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:14px">
+    <b style="font-size:13px;display:block;margin:0 0 6px;color:var(--danger)">Zona de peligro</b>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">Elimina la organización con todos sus datos y miembros. Irreversible.</p>
+    <button class="btn danger sm" onclick="openDeleteOrg()">Eliminar organización</button>
+  </div>`;
+  return `<div style="padding:10px 4px"><div class="eyebrow">Miembros</div>${list}${form}${danger}</div>`;
+}
+// PATCH genérico de un miembro del panel. Ante error (p.ej. 400 "sin admin")
+// NO se muta PLAT_MEMBERS: el re-render revierte el select/estado anterior.
+async function patchPanelMember(idx, patch, okMsg, failMsg){
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m||!PLAT_M_ORG) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/members/'+encodeURIComponent(m.id),{method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(patch)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='platform') renderPlatform();
+    return;
+  }
+  if(res.ok){
+    if(patch.role!==undefined) m.role=patch.role;
+    if(patch.active!==undefined) m.active=patch.active;
+    toast(okMsg);
+    // Refrescar panel (emails/estado frescos) + tabla (contador de miembros).
+    loadOrgMembers();
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error||failMsg);
+    if(state.view==='platform') renderPlatform(); // revierte el select/estado
+  }
+}
+window.changeMemberRole=(idx, role)=>patchPanelMember(idx,{role},'Rol actualizado','No se pudo cambiar el rol');
+window.toggleMemberActive=(idx)=>{
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m) return;
+  const activar=m.active===false;
+  if(!activar && !confirm('¿Desactivar a este miembro? No va a poder entrar.')) return;
+  return patchPanelMember(idx,{active:activar},activar?'Miembro reactivado':'Miembro desactivado','No se pudo actualizar al miembro');
+};
+// ---------- Eliminar organización (SOLO super-admins) ----------
+// Modal lazy patrón pwOv: confirmación fuerte escribiendo el nombre EXACTO de
+// la org. La comparación se hace contra el valor crudo (referencia en DEL_ORG),
+// nunca contra el nombre renderizado en el DOM (que va escapado con esc()).
+let DEL_ORG=null;
+window.openDeleteOrg=()=>{
+  const org=(ORGS||[]).find(o=>o&&o.id===PLAT_M_ORG);
+  if(!org) return;
+  DEL_ORG=org;
+  let ov=document.getElementById('delOrgOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='delOrgOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeDeleteOrg(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:420px">
+    <button class="drill-x" onclick="closeDeleteOrg()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Zona de peligro</div><h3>Eliminar ${esc(org.name)}</h3></div></div>
+    <p class="drill-def">Esto es <b>irreversible</b>: se borran las ventas, entradas, metas, integraciones y miembros de la organización. Los usuarios no se borran de la autenticación, pero pierden el acceso al tracker.</p>
+    <div class="field"><label>Escribí el nombre exacto de la organización para confirmar</label>
+      <input class="inp" id="delOrgInput" autocomplete="off" oninput="delOrgCheck()"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn ghost sm" type="button" onclick="closeDeleteOrg()">Cancelar</button>
+      <button class="btn danger sm" id="delOrgBtn" disabled onclick="confirmDeleteOrg()">Eliminar definitivamente</button>
+    </div>
+  </div>`;
+  ov.style.display='flex';
+  const inp=document.getElementById('delOrgInput'); if(inp) inp.focus();
+};
+window.closeDeleteOrg=()=>{ DEL_ORG=null; const ov=document.getElementById('delOrgOv'); if(ov) ov.style.display='none'; };
+window.delOrgCheck=()=>{
+  const inp=document.getElementById('delOrgInput'), btn=document.getElementById('delOrgBtn');
+  if(!inp||!btn||!DEL_ORG) return;
+  btn.disabled = inp.value !== DEL_ORG.name;
+};
+window.confirmDeleteOrg=async ()=>{
+  if(!DEL_ORG) return;
+  const inp=document.getElementById('delOrgInput');
+  if(!inp || inp.value!==DEL_ORG.name) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  const btn=document.getElementById('delOrgBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Eliminando…'; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(DEL_ORG.id),{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='Eliminar definitivamente'; }
+    toast('No se pudo conectar con el servidor');
+    return;
+  }
+  if(res.ok){
+    const d=data.deleted||{};
+    toast(`Organización eliminada: ${d.profiles||0} miembros, ${d.sales||0} ventas, ${d.entries||0} entradas`, 3200);
+    closeDeleteOrg();
+    PLAT_M_ORG=null; PLAT_MEMBERS=null;
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+    if(state.view==='platform') renderPlatform();
+  } else {
+    if(btn){ btn.disabled=false; btn.textContent='Eliminar definitivamente'; }
+    toast(data.error||'No se pudo eliminar la organización');
+  }
+};
+// ---------- Entrar como (impersonación de soporte) ----------
+// Pide un magic link a la API y navega directo: supabase-js pisa la sesión con
+// la del miembro al detectar el hash al volver (no hace falta signOut previo).
+// El link JAMÁS se muestra, se loggea ni va a un toast.
+window.loginAsMember=async (idx)=>{
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m||!PLAT_M_ORG) return;
+  if(!confirm('Vas a salir de tu sesión de super-admin y entrar como '+(m.name||m.email||'este miembro')+'. Para volver: cerrá sesión y logueate de nuevo.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/members/'+encodeURIComponent(m.id)+'/login-link',{method:'POST',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok && data.link){ window.location.href=data.link; }
+  else{ toast(data.error||'No se pudo generar el acceso'); }
+};
+window.addOrgAdmin=async ()=>{
+  if(ADMIN_CREATING||!PLAT_M_ORG) return;
+  const name=(document.getElementById('orgAdmName').value||'').trim();
+  const email=(document.getElementById('orgAdmEmail').value||'').trim();
+  const pass=(document.getElementById('orgAdmPass').value||'').trim();
+  if(!name){ toast('Tienes que poner el nombre del admin'); return; }
+  if(!email){ toast('Tienes que poner el email del admin'); return; }
+  if(pass && pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  ADMIN_CREATING=true;
+  if(state.view==='platform') renderPlatform();
+  const body={name, email};
+  if(pass) body.password=pass;
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/admins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    ADMIN_CREATING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='platform') renderPlatform();
+    return;
+  }
+  ADMIN_CREATING=false;
+  if(res.ok){
+    // Reutiliza el box de credenciales de un solo uso: la password vive SOLO
+    // en ORG_CREATED (memoria) hasta cerrar el box — jamás se persiste ni loggea.
+    const org=(ORGS||[]).find(o=>o.id===PLAT_M_ORG);
+    ORG_CREATED={ name:((org&&org.name)||'Organización')+' — nuevo admin', email:data.admin_email||email, password:data.admin_password||null, existing:!!data.existing_account };
+    toast('Admin agregado');
+    // Re-render fresco del panel = inputs limpios; tabla con el admin nuevo.
+    loadOrgMembers();
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error||'No se pudo agregar el admin');
+    if(state.view==='platform') renderPlatform();
+  }
+};
+
+// ---------- Vista Plataforma (renderPlatform) ----------
+// Exclusiva del super-admin: card de la API de agencia (token editable con
+// hint) + la sección Organizaciones completa (mudada desde Configuraciones).
+function renderPlatform(){
+  if(!IS_SUPER){ go('dashboard'); return; }
+  const setStatus=(PLAT_SETTINGS && PLAT_SETTINGS.agency_pit_set)
+    ? `<span class="tag ok">Configurada</span> <span class="ghl-code-val" style="font-size:14px">${esc(PLAT_SETTINGS.agency_pit_hint||'')}</span>`
+    : `<span class="tag warn">No configurada</span>`;
+  const pitCard=`<div class="section"><div class="eyebrow">API de agencia HighLevel</div>
+    <p style="font-size:13.5px;margin:0 0 10px">Estado: ${setStatus}</p>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 10px">Con este token la plataforma lista las subcuentas de tu agencia para pre-asignarlas al crear una organización. Se valida contra HighLevel antes de guardarse y nunca se vuelve a mostrar completo. Guardar vacío lo borra.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input class="inp" id="platPit" type="password" placeholder="Pegá el Private Integration Token de agencia" autocomplete="off" style="max-width:420px">
+      <button class="btn sm" onclick="savePlatPit()">Guardar</button>
+    </div>
+  </div>`;
+  VIEW.innerHTML = topbar('') + `<div style="margin-bottom:10px"><button class="btn ghost sm" onclick="go('dashboard')">← Volver al panel</button></div>` + `<div class="eyebrow">Plataforma</div><h2 class="view">Plataforma ${info('Configuración global de Maze Sales Tracker: API de agencia de HighLevel y alta de organizaciones. Solo la ve el equipo de Maze.')}</h2>
+    ${pitCard}${orgsCard()}` + footer();
+}
+window.savePlatPit=async ()=>{
+  const inp=document.getElementById('platPit');
+  const valor=inp?inp.value.trim():'';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/platform/settings',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({agency_pit:valor})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    PLAT_SETTINGS={agency_pit_set:!!data.agency_pit_set, agency_pit_hint:data.agency_pit_hint||null};
+    toast(data.agency_pit_set?'Token de agencia guardado':'Token de agencia eliminado');
+    if(state.view==='platform') renderPlatform();
+  } else {
+    toast(data.error || 'No se pudo guardar el token');
+  }
+};
+
 function renderTeam(){
+  const ro = !IS_ADMIN;
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
     .map(([v,l])=>`<option value="${v}" ${DB.team.mode===v?'selected':''}>${l}</option>`).join('');
   const tz=(DB.team.tz)||'America/Argentina/Buenos_Aires';
@@ -943,65 +1966,118 @@ function renderTeam(){
   let list='';
   DB.members.forEach(m=>{
     const line2 = m.role==='closer'
-      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)">% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
+      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)" ${ro?'disabled':''}>% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
       : '';
     list+=`<div class="cfg-member">
       <div class="cfg-line1">
-        <input class="inp cfg-name" value="${esc(m.name)}" onchange="setMemberName('${m.id}',this.value)" data-tip="Nombre de la persona. Se actualiza en todo el panel.">
-        <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga.">${roleOpts(m.role)}</select>
+        <input class="inp cfg-name" value="${esc(m.name)}" onchange="setMemberName('${m.id}',this.value)" data-tip="Nombre de la persona. Se actualiza en todo el panel." ${ro?'disabled':''}>
+        <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga." ${ro?'disabled':''}>${roleOpts(m.role)}</select>
         <span class="cfg-spacer"></span>
-        <button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>
-        <button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>
+        ${(IS_ADMIN || (ME && m.id===ME.id)) ? `<button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>` : ''}
+        ${IS_ADMIN ? `<button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>` : ''}
       </div>${line2}
     </div>`;
   });
   if(!DB.members.length) list=`<div class="empty">Sin miembros todavía.</div>`;
-  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
-    <div class="section"><div class="eyebrow">Agencia</div>
-      <div class="grid2">
-        <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)"></div>
-        <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)">${modeOpts}</select></div>
-        <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)">${tzOpts}</select></div>
-      </div>
-    </div>
-    <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
-    <div class="section"><div class="eyebrow">Agregar miembro</div>
+  // Alta manual: solo sin GHL conectado. Con conexión, el equipo se sincroniza
+  // 100% desde HighLevel (decisión 2026-07-04). La baja manual (Quitar) queda siempre.
+  const addMemberForm=`<div class="section"><div class="eyebrow">Agregar miembro</div>
       <div class="grid2">
         <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
         <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
+        <div class="field"><label>Email</label><input class="inp" id="newEmail" type="email" placeholder="persona@email.com"></div>
+        <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
       </div>
       <button class="btn" onclick="addMember()">Agregar al equipo</button>
-    </div>` + footer();
+    </div>`;
+  const addMemberHint=`<div class="section"><div class="eyebrow">Agregar miembro</div>
+      <p style="color:var(--muted);font-size:13px;margin:0">El equipo se sincroniza desde HighLevel. Importá miembros desde "Equipo desde HighLevel".</p>
+    </div>`;
+  const addMemberBox = !IS_ADMIN ? '' : ((GHL_STATUS && GHL_STATUS.connected) ? addMemberHint : addMemberForm);
+  VIEW.innerHTML = topbar('') + `<div style="margin-bottom:10px"><button class="btn ghost sm" onclick="go('dashboard')">← Volver al panel</button></div>` + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
+    ${adminNotice()}
+    <div class="section"><div class="eyebrow">Agencia</div>
+      <div class="grid2">
+        <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)" ${ro?'disabled':''}>${modeOpts}</select></div>
+        <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)" ${ro?'disabled':''}>${tzOpts}</select></div>
+        <div class="field"><label>Base de comisiones ${info('Contador: % sobre el cash que carga el closer en Cargar día. Cobrado: % sobre lo que entró de verdad — cash y reservas de sus ventas más cuotas cobradas (por fecha de cobro).')}</label>
+          <select class="inp" onchange="setCommissionBase(this.value)" ${ro?'disabled':''}>
+            <option value="contador" ${(DB.team.commission_base||'contador')==='contador'?'selected':''}>Contador manual (como siempre)</option>
+            <option value="cobrado" ${(DB.team.commission_base||'contador')==='cobrado'?'selected':''}>Sobre lo cobrado (ventas + cuotas)</option>
+          </select></div>
+      </div>
+    </div>
+    <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
+    ${addMemberBox}
+    ${ghlCard()}${ghlTeamCard()}` + footer();
 }
-window.setAgName=(v)=>{ DB.team.name=(v||'Mi Agencia').trim(); save(); };
-window.setMode=(v)=>{ DB.team.mode=v; save(); };
-window.setTz=(v)=>{ DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
-window.setMemberName=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
-window.setMemberRole=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
-window.setCommission=(id,v)=>{ const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
+window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
+window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
+window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
+window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
+window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+window.setCommissionBase=(v)=>{ if(!IS_ADMIN) return; DB.team.commission_base=(v==='cobrado')?'cobrado':'contador'; save(); toast('Base de comisiones guardada'); renderTeam(); };
+window.setCommission=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
 window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
-window.addMember=()=>{
-  const name=(document.getElementById('newName').value||'').trim(); const role=document.getElementById('newRole').value;
-  if(!name){ toast('Poné un nombre'); return; }
-  const m={id:uid(), name, role}; if(role==='closer') m.commission=0;
-  DB.members.push(m); save(); toast(name+' agregado'); renderTeam();
+window.addMember=async ()=>{
+  if(!IS_ADMIN) return;
+  const name=(document.getElementById('newName').value||'').trim();
+  const role=document.getElementById('newRole').value;
+  const email=(document.getElementById('newEmail').value||'').trim();
+  const password=document.getElementById('newPass').value||'';
+  if(!name){ toast('Tienes que poner un nombre'); return; }
+  if(!email){ toast('Tienes que poner un email'); return; }
+  if(!password){ toast('Tienes que poner una contraseña'); return; }
+  if(password.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({name, role, email, password})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast(name+' agregado al equipo'); await loadFromSupabase(); renderTeam(); }
+  else{ toast(data.error || 'No se pudo agregar'); }
 };
-window.delMember=(id)=>{ if(!confirm('¿Quitar del equipo? Sus datos quedan guardados pero no se muestran.')) return; DB.members=DB.members.filter(m=>m.id!==id); save(); renderTeam(); };
+window.delMember=async (id)=>{
+  if(!IS_ADMIN) return;
+  if(!confirm('¿Dar de baja a esta persona? Sus datos históricos se conservan, pero ya no va a poder entrar a la app.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/members/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){ toast('Miembro dado de baja'); await loadFromSupabase(); renderTeam(); }
+  else{ toast(data.error || 'No se pudo dar de baja'); }
+};
 
 // ---------- Metas ----------
 function renderGoals(){
   const g=DB.goals.week||{};
+  const gm=DB.goals.month||{};
+  const ro=!IS_ADMIN;
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Metas</div><h2 class="view">Objetivos semanales del equipo</h2>
+    ${adminNotice()}
     <div class="cap-wrap">
       <div class="grid2">
-        <div class="field"><label>Cierres / semana</label><input class="inp" type="number" min="0" value="${g.cierres||''}" onchange="setGoal('cierres',this.value)"></div>
-        <div class="field"><label>Cash collected / semana ($)</label><input class="inp" type="number" min="0" value="${g.cash_nuevo||''}" onchange="setGoal('cash_nuevo',this.value)"></div>
-        <div class="field"><label>Agendados / semana</label><input class="inp" type="number" min="0" value="${g.agendados||''}" onchange="setGoal('agendados',this.value)"></div>
+        <div class="field"><label>Cierres / semana</label><input class="inp" type="number" min="0" value="${g.cierres||''}" onchange="setGoal('cierres',this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Cash collected / semana ($)</label><input class="inp" type="number" min="0" value="${g.cash_nuevo||''}" onchange="setGoal('cash_nuevo',this.value)" ${ro?'disabled':''}></div>
+        <div class="field"><label>Agendados / semana</label><input class="inp" type="number" min="0" value="${g.agendados||''}" onchange="setGoal('agendados',this.value)" ${ro?'disabled':''}></div>
       </div>
       <p style="color:var(--muted);font-size:13px;margin-top:6px">El panel usa estas metas para el <b>pacing</b>: te dice si el equipo va adelantado o atrasado según cuántos días de la semana ya pasaron.</p>
+    </div>
+    <div class="cap-wrap" style="margin-top:18px">
+      <div class="eyebrow" style="margin-bottom:10px">Meta de caja del mes ${info('Plata cobrada total del mes: cash y reservas de ventas nuevas + cuotas cobradas. El progreso y el ritmo se ven en la vista Caja.')}</div>
+      <div class="grid2">
+        <div class="field"><label>Caja del mes ($)</label><input class="inp" type="number" min="0" value="${gm.caja||''}" onchange="setGoalMonth('caja',this.value)" ${ro?'disabled':''}></div>
+      </div>
     </div>` + footer();
 }
-window.setGoal=(k,v)=>{ if(!DB.goals.week) DB.goals.week={}; const n=+v||0; if(n) DB.goals.week[k]=n; else delete DB.goals.week[k]; save(); toast('Meta guardada'); };
+window.setGoal=(k,v)=>{ if(!IS_ADMIN) return; if(!DB.goals.week) DB.goals.week={}; const n=+v||0; if(n) DB.goals.week[k]=n; else delete DB.goals.week[k]; save(); toast('Meta guardada'); };
+window.setGoalMonth=(k,v)=>{ if(!IS_ADMIN) return; if(!DB.goals.month) DB.goals.month={}; const n=+v||0; if(n) DB.goals.month[k]=n; else delete DB.goals.month[k]; save(); toast('Meta guardada'); };
 
 // ---------- Ventas ----------
 function renderSales(){
@@ -1020,43 +2096,321 @@ function renderSales(){
     </div>
     <div class="section"><div class="eyebrow">Registrar venta</div>
       <div class="grid2">
-        <div class="field"><label>Cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+        <div class="field" id="s_lead_wrap" style="display:none"><label>Cliente (estuvo en llamada)</label><select class="inp" id="s_lead" onchange="document.getElementById('s_cliente_wrap').style.display=this.value==='__manual__'?'':'none'"><option value="">Cargando leads con cita…</option></select></div>
+        <div class="field" id="s_cliente_wrap"><label>Nombre del cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+        <div id="s_lead_hint" style="display:none;grid-column:1/-1;color:var(--muted);font-size:12.5px;padding:2px 2px 0">ℹ No encontramos llamadas recientes en el calendario — cargá el cliente a mano.</div>
         <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="High Ticket / Membresía / Lite"></div>
         <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="4000"></div>
         <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>Cantidad de pagos</label><input class="inp" id="s_cuotas" type="number" min="1" value="1"></div>
+        <div class="field"><label>Monto del primer pago ($)</label><input class="inp" id="s_primerpago" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>¿Fue reserva (seña)?</label><select class="inp" id="s_reservaflag" onchange="const r=document.getElementById('s_reserva');r.disabled=!this.value;if(!this.value)r.value='';"><option value="">No</option><option value="1">Sí</option></select></div>
+        <div class="field"><label>Monto de la reserva ($)</label><input class="inp" id="s_reserva" type="number" min="0" placeholder="500" disabled></div>
         <div class="field"><label>Fuente del lead</label><input class="inp" id="s_fuente" placeholder="Instagram / TikTok / YouTube"></div>
         <div class="field"><label>Método de pago</label><input class="inp" id="s_metodo" placeholder="Transferencia / Tarjeta"></div>
         <div class="field"><label>Closer</label><select class="inp" id="s_closer">${opt(closers)}</select></div>
-        <div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>
+        ${triages.length?`<div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>`:`<input type="hidden" id="s_triage" value="">`}
         <div class="field"><label>Setter</label><select class="inp" id="s_setter">${opt(setters)}</select></div>
       </div>
-      <button class="btn" onclick="addSale()">Registrar venta</button>
+      <button class="btn" id="s_submit" onclick="addSale()">Registrar venta</button>
     </div>
     <div class="section"><div class="eyebrow">Historial</div>
       <div class="rollup"><table>
         <thead><tr><th>Fecha</th><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Facturado</th><th>Cash</th><th style="text-align:left">Closer</th><th style="text-align:left">Fuente</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>` + footer();
+  loadGhlLeads();
 }
 function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
-window.addSale=()=>{
+
+// Trae los leads con cita reciente del calendario de admisión (vía mini-API → GHL).
+// Fallback obligatorio: sin GHL (501/error/0 leads) la vista queda en modo manual
+// — input de nombre visible y botón "Registrar venta" — sin toast de error:
+// la ausencia de GHL es un estado normal, no una falla.
+let GHL_LEADS=[];
+async function loadGhlLeads(){
+  const sel=document.getElementById('s_lead'); if(!sel) return;
+  const manualMode=(showHint)=>{
+    GHL_LEADS=[];
+    const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='none';
+    const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='';
+    const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta';
+    const h=document.getElementById('s_lead_hint'); if(h) h.style.display=showHint?'':'none';
+  };
+  let j=null;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){ manualMode(false); return; }
+    const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok){ manualMode(true); return; }
+    j=await r.json();
+  }catch(e){ manualMode(true); return; }
+  if(!j || !j.leads || !j.leads.length){ manualMode(true); return; }
+  GHL_LEADS=j.leads;
+  const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
+  sel.innerHTML = `<option value="">— Elegí el lead de la llamada —</option>`
+    + GHL_LEADS.map(c=>`<option value="${esc(c.id)}">${esc(fmt(c))}</option>`).join('')
+    + `<option value="__manual__">Otro (escribir a mano, sin GHL)</option>`;
+  const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='';
+  const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='none';
+  const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta y disparar onboarding';
+}
+
+window.addSale=async()=>{
   const g=(id)=>document.getElementById(id).value;
-  const cliente=(g('s_cliente')||'').trim(); if(!cliente){ toast('Poné el cliente'); return; }
-  DB.sales.push({id:uid(), date:todayStr(), cliente, programa:g('s_programa')||'—', metodo:g('s_metodo')||'—',
-    facturado:+g('s_fact')||0, cash:+g('s_cash')||0, cuotas:0, reserva:0,
-    closer:g('s_closer'), triage:g('s_triage'), setter:g('s_setter'), fuente:g('s_fuente')||'—'});
-  save(); toast('Venta registrada'); renderSales();
+  const leadSel=g('s_lead');
+  let cliente='', ghlId=null;
+  if(leadSel && leadSel!=='__manual__'){
+    const lead=GHL_LEADS.find(l=>l.id===leadSel);
+    cliente=lead?lead.name:''; ghlId=leadSel;
+  } else {
+    cliente=(g('s_cliente')||'').trim();
+  }
+  if(!cliente){ toast('Elegí el lead o escribí el cliente'); return; }
+  const fueReserva=!!g('s_reservaflag');
+  const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
+    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:+g('s_cuotas')||1,reserva:+g('s_reserva')||0,
+    primer_pago:+g('s_primerpago')||0,fue_reserva:fueReserva,ghl_contact_id:ghlId,
+    closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
+  const {data,error}=await sb.from('st_sales').insert(row).select().single();
+  if(error){ toast('No se pudo (permiso)'); return; }
+  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:row.cuotas,reserva:row.reserva,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
+
+  // Cierre del ciclo en GHL (best-effort): custom fields + tag de onboarding + oportunidad + Slack.
+  if(ghlId){
+    try{
+      const closer=DB.members.find(m=>m.id===row.closer_id);
+      const {data:{session}}=await sb.auth.getSession();
+      const r=await fetch('/api/sales/ghl',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
+        body:JSON.stringify({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
+          cuotas:row.cuotas,metodo:row.metodo,fueReserva:fueReserva,reserva:row.reserva,primerPago:row.primer_pago,
+          vendedor:closer?closer.name:''})});
+      const j=await r.json();
+      if(j.ok){ toast(fueReserva?'Reserva registrada — tag "reserva" aplicado 🔒':'Venta registrada — onboarding disparado 🎉'); }
+      else { toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+    }catch(e){ toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+  } else {
+    toast('Venta registrada');
+  }
+  renderSales();
 };
-window.delSale=(id)=>{ DB.sales=DB.sales.filter(s=>s.id!==id); save(); renderSales(); };
+window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); DB.cuotas=(DB.cuotas||[]).filter(c=>c.sale_id!==id); renderSales(); };
+
+// ---------- Caja (cash del front + cuotas del back) ----------
+let GHL_LOC=null, GHL_LOC_ASKED=false;
+// El endpoint es solo-admin; para no-admins no hay link (la vista es solo-lectura).
+async function loadGhlLocation(){
+  if(GHL_LOC_ASKED||!IS_ADMIN) return;
+  GHL_LOC_ASKED=true;
+  try{
+    const {data:{session}}=await sb.auth.getSession(); if(!session) return;
+    const r=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); }
+  }catch(e){}
+}
+// Refresca las cuotas desde Supabase (el trigger las genera server-side al
+// registrar una venta, así que el estado local queda viejo hasta este fetch).
+let _cuoRefreshing=false;
+async function refreshCuotas(){
+  if(_cuoRefreshing||!ME) return;
+  _cuoRefreshing=true;
+  try{
+    const fresh=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data;
+    if(fresh){
+      const mapped=fresh.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}));
+      if(JSON.stringify(mapped)!==JSON.stringify(DB.cuotas||[])){ DB.cuotas=mapped; save(); if(state.view==='caja') renderCaja(); }
+    }
+  }catch(e){}
+  _cuoRefreshing=false;
+}
+function moneyFull(n){ return '$'+(+n||0).toLocaleString('es'); }
+function cuotaEstado(c){ if(c.status==='pagada') return 'pagada'; return c.due_date<todayStr()?'vencida':'pendiente'; }
+// Pacing de la meta de caja: SIEMPRE sobre el mes calendario en curso,
+// sin importar el selector de período de la vista (la meta es mensual).
+function metaCajaBlock(){
+  const meta=+((DB.goals.month||{}).caja)||0;
+  if(!meta) return '';
+  const rm=range('month', parseD(todayStr()));
+  const inM=(d)=>d>=rm.start&&d<=rm.end;
+  const front=DB.sales.filter(s=>inM(s.date)).reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const back=(DB.cuotas||[]).filter(c=>c.status==='pagada'&&c.paid_date&&inM(c.paid_date)).reduce((a,c)=>a+(+c.paid_amount||0),0);
+  const cobrado=front+back;
+  const today=parseD(todayStr());
+  const diasMes=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+  const rest=diasMes-today.getDate();
+  const pctReal=cobrado/meta*100;
+  const pct=Math.min(100,Math.round(pctReal));
+  const pctMes=today.getDate()/diasMes*100;
+  const done=cobrado>=meta;
+  const chip=done?`<span class="cuo-est paga">Meta cumplida 🎉</span>`:(pctReal>=pctMes?`<span class="cuo-est paga">Adelantado</span>`:`<span class="cuo-est venc">Atrasado</span>`);
+  const ritmo=done?'':` · necesitás ${moneyFull(Math.ceil((meta-cobrado)/Math.max(rest,1)))}/día`;
+  return `<div class="section"><div class="eyebrow">Meta de caja · ${MONTHS[today.getMonth()]} ${today.getFullYear()} ${info('Cobrado del mes (front + back) contra la meta fijada en Metas. Adelantado/Atrasado compara tu % cobrado con el % del mes ya transcurrido.')}</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+      <b style="font-size:18px">${moneyFull(cobrado)}</b><span style="color:var(--muted)">de ${moneyFull(meta)} · ${pct}%${done?'':` · quedan ${rest} días`}${ritmo}</span>${chip}
+    </div>
+    <div style="height:10px;border-radius:20px;background:rgba(127,127,127,.18);overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--accent,#C5FF49)"></div></div>
+  </div>`;
+}
+// Solo con la base 'cobrado': desglose de comisiones por closer del período visible.
+function comisionesBlock(r){
+  if((DB.team.commission_base||'contador')!=='cobrado') return '';
+  const closers=membersByRole('closer').filter(m=>(+m.commission||0)>0);
+  if(!closers.length) return '';
+  let rows='';
+  closers.forEach(m=>{
+    const b=closerPayoutBase(m.id, r.start, r.end);
+    rows+=`<tr><td style="text-align:left">${esc(m.name)}</td><td>${moneyFull(b.front)}</td><td>${moneyFull(b.back)}</td><td>${m.commission}%</td><td><b>${moneyFull(Math.round(m.commission/100*b.base))}</b></td></tr>`;
+  });
+  return `<div class="section"><div class="eyebrow">Comisiones del período ${info('Base "cobrado": front (cash+reservas de sus ventas) + back (cuotas cobradas, por fecha de cobro) × su % de comisión.')}</div>
+    <div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Closer</th><th>Front</th><th>Back</th><th>%</th><th>A cobrar</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+}
+function renderCaja(){
+  const cuotas=DB.cuotas||[];
+  const r=range(state.ptype, parseD(state.ref));
+  const inR=(d)=>d>=r.start&&d<=r.end;
+  const front=DB.sales.filter(s=>inR(s.date)).reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const back=cuotas.filter(c=>c.status==='pagada'&&c.paid_date&&inR(c.paid_date)).reduce((a,c)=>a+(+c.paid_amount||0),0);
+  const calle=cuotas.filter(c=>c.status!=='pagada').reduce((a,c)=>a+(+c.monto||0),0);
+  const today=parseD(todayStr());
+  let proj='';
+  for(let k=0;k<3;k++){
+    const m0=new Date(today.getFullYear(),today.getMonth()+k,1), m1=new Date(today.getFullYear(),today.getMonth()+k+1,0);
+    const a=dstr(m0), b=dstr(m1);
+    const tot=cuotas.filter(c=>c.status!=='pagada'&&c.due_date>=a&&c.due_date<=b).reduce((x,c)=>x+(+c.monto||0),0);
+    proj+=mini(MONTHS[m0.getMonth()]+' '+m0.getFullYear(), moneyFull(tot));
+  }
+  const saleOf=(id)=>DB.sales.find(s=>s.id===id)||{};
+  const q=(state.cajaQ||'').toLowerCase(), f=state.cajaF||'abiertas';
+  let list=cuotas.map(c=>({...c,est:cuotaEstado(c),sale:saleOf(c.sale_id)}));
+  if(f==='abiertas') list=list.filter(c=>c.est!=='pagada');
+  else if(f!=='todas') list=list.filter(c=>c.est===f);
+  if(q) list=list.filter(c=>String(c.sale.cliente||'').toLowerCase().includes(q));
+  list.sort((a,b)=>a.due_date<b.due_date?-1:1);
+  const EST={pendiente:'<span class="cuo-est">Pendiente</span>',vencida:'<span class="cuo-est venc">Vencida</span>',pagada:'<span class="cuo-est paga">Pagada</span>'};
+  let rows='';
+  list.forEach(c=>{
+    const s=c.sale;
+    const ghlBtn=(s.ghl&&GHL_LOC)
+      ?`<a class="btn ghost sm" href="https://app.mazefunnels.com/v2/location/${esc(GHL_LOC)}/contacts/detail/${esc(s.ghl)}" target="_blank" rel="noopener" title="Abrir contacto en GHL">💬</a>`
+      :(s.ghl?'':`<span style="color:var(--muted);font-size:11px">sin contacto GHL</span>`);
+    const acts=(IS_ADMIN&&c.status!=='pagada')
+      ?`<button class="btn sm" onclick="openCobrarModal('${c.id}')">Cobrar</button> <button class="btn ghost sm" onclick="openEditCuotaModal('${c.id}')" title="Editar monto o fecha">✎</button>`
+      :(c.status==='pagada'?`<span style="color:var(--muted);font-size:11px">${c.paid_date||''}</span>`:'');
+    rows+=`<tr><td style="text-align:left">${esc(s.cliente||'—')}</td><td style="text-align:left">${esc(s.programa||'—')}</td><td>${c.numero}/${Math.max(+s.cuotas||0,c.numero)}</td><td>${moneyFull(c.status==='pagada'?c.paid_amount:c.monto)}</td><td>${c.due_date}</td><td>${EST[c.est]}</td><td>${ghlBtn}</td><td>${acts}</td></tr>`;
+  });
+  if(!rows) rows=`<tr><td colspan="8" class="empty">No hay cuotas en este filtro.</td></tr>`;
+  const FL={abiertas:'Abiertas',pendiente:'Pendientes',vencida:'Vencidas',pagada:'Pagadas',todas:'Todas'};
+  const filtros=Object.keys(FL).map(x=>`<button class="chip" style="${f===x?'border-color:var(--accent,#C5FF49);color:var(--accent,#C5FF49)':''}" onclick="setCajaF('${x}')">${FL[x]}</button>`).join('');
+  VIEW.innerHTML = topbar(periodControls()) + `<div class="eyebrow">Caja</div><h2 class="view">Cash del front, cuotas del back</h2>
+    ${adminNotice()}
+    ${metaCajaBlock()}
+    <div class="cards-mini section">
+      ${mini('Caja front '+info('Cash collected + reservas de las ventas del período (por fecha de venta).'),moneyFull(front))}
+      ${mini('Caja back '+info('Cuotas cobradas en el período (por fecha real de cobro).'),moneyFull(back))}
+      ${mini('Total período',moneyFull(front+back))}
+      ${mini('En la calle '+info('Todo lo pendiente de cobro, de todos los tiempos: cuotas pendientes + vencidas.'),moneyFull(calle))}
+    </div>
+    <div class="section"><div class="eyebrow">Proyección de cobros ${info('Lo que debería entrar según las cuotas agendadas, mes por mes.')}</div>
+      <div class="cards-mini">${proj}</div></div>
+    ${comisionesBlock(r)}
+    <div class="section"><div class="eyebrow">Cuotas</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        ${filtros}
+        <input class="inp" style="max-width:220px;margin-left:auto" placeholder="Buscar cliente…" value="${esc(state.cajaQ||'')}" oninput="setCajaQ(this.value)">
+      </div>
+      <div class="rollup"><table>
+        <thead><tr><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Cuota</th><th>Monto</th><th>Vence</th><th>Estado</th><th>GHL</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>` + footer();
+  loadGhlLocation();
+  refreshCuotas();
+}
+window.setCajaF=(x)=>{ state.cajaF=x; renderCaja(); };
+let _cq; window.setCajaQ=(v)=>{ state.cajaQ=v; clearTimeout(_cq); _cq=setTimeout(renderCaja,250); };
+window.closeCuotaModal=()=>{ const ov=document.getElementById('cuoOv'); if(ov) ov.style.display='none'; };
+function cuotaOverlay(){
+  let ov=document.getElementById('cuoOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='cuoOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeCuotaModal(); });
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+window.openCobrarModal=(id)=>{
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(!c) return;
+  const s=DB.sales.find(x=>x.id===c.sale_id)||{};
+  const ov=cuotaOverlay();
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closeCuotaModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Cobrar cuota</div><h3>${esc(s.cliente||'—')} · cuota ${c.numero}</h3></div></div>
+    <p class="drill-def">Agendada: ${moneyFull(c.monto)} · vence ${c.due_date}. Si entró un monto distinto, corregilo acá: la caja registra lo que entró de verdad.</p>
+    <form onsubmit="return submitCobro(event,'${c.id}')">
+      <div class="field"><label>Monto que entró ($)</label><input class="inp" id="cu_amount" type="number" step="0.01" min="0.01" value="${+c.monto}" required></div>
+      <div class="field" style="margin:10px 0 16px"><label>Fecha del cobro</label><input class="inp" id="cu_date" type="date" value="${todayStr()}" required></div>
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closeCuotaModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="cu_btn">Registrar cobro</button>
+      </div>
+    </form></div>`;
+  ov.style.display='flex';
+  document.getElementById('cu_amount').focus();
+};
+window.submitCobro=async(ev,id)=>{
+  ev.preventDefault();
+  const amount=+document.getElementById('cu_amount').value||0;
+  const date=document.getElementById('cu_date').value;
+  if(amount<=0||!date){ toast('Monto y fecha son obligatorios'); return false; }
+  const btn=document.getElementById('cu_btn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const {error}=await sb.from('st_cuotas').update({status:'pagada',paid_amount:amount,paid_date:date}).eq('id',id);
+  if(error){ toast('No se pudo (permiso)'); if(btn){ btn.disabled=false; btn.textContent='Registrar cobro'; } return false; }
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(c){ c.status='pagada'; c.paid_amount=amount; c.paid_date=date; }
+  save(); closeCuotaModal(); toast('Cobro registrado 💰'); renderCaja();
+  return false;
+};
+window.openEditCuotaModal=(id)=>{
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(!c) return;
+  const s=DB.sales.find(x=>x.id===c.sale_id)||{};
+  const ov=cuotaOverlay();
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closeCuotaModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Editar cuota</div><h3>${esc(s.cliente||'—')} · cuota ${c.numero}</h3></div></div>
+    <p class="drill-def">Ajustá el acuerdo real con el cliente: monto o fecha de vencimiento.</p>
+    <form onsubmit="return submitEditCuota(event,'${c.id}')">
+      <div class="field"><label>Monto ($)</label><input class="inp" id="ce_amount" type="number" step="0.01" min="0.01" value="${+c.monto}" required></div>
+      <div class="field" style="margin:10px 0 16px"><label>Vence</label><input class="inp" id="ce_date" type="date" value="${c.due_date}" required></div>
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closeCuotaModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="ce_btn">Guardar</button>
+      </div>
+    </form></div>`;
+  ov.style.display='flex';
+};
+window.submitEditCuota=async(ev,id)=>{
+  ev.preventDefault();
+  const monto=+document.getElementById('ce_amount').value||0;
+  const due=document.getElementById('ce_date').value;
+  if(monto<=0||!due){ toast('Monto y fecha son obligatorios'); return false; }
+  const btn=document.getElementById('ce_btn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const {error}=await sb.from('st_cuotas').update({monto,due_date:due}).eq('id',id);
+  if(error){ toast('No se pudo (permiso)'); if(btn){ btn.disabled=false; btn.textContent='Guardar'; } return false; }
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(c){ c.monto=monto; c.due_date=due; }
+  save(); closeCuotaModal(); toast('Cuota actualizada'); renderCaja();
+  return false;
+};
 
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function info(tip){ return `<span class="info" data-tip="${esc(tip)}">i</span>`; }
+function adminNotice(){ return IS_ADMIN ? '' : '<div class="admin-lock">🔒 <span>Solo el admin puede editar esta sección. Puedes ver los datos del equipo, pero no modificarlos.</span></div>'; }
 function footer(){ return `<div class="footnote">
   <span>Maze Sales Tracker IA · v1 funcional</span><span class="dot2"></span>
   <span>Datos guardados en este navegador</span><span class="dot2"></span>
   <a href="https://github.com/mazeos/maze-sales-tracker" target="_blank" rel="noopener">repo</a></div>`; }
 let toastT;
-function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
+function toast(msg,ms){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),ms||1800); }
 window.toast=toast;
 
 // ---------- tema claro/oscuro ----------
@@ -1082,7 +2436,70 @@ applyTheme((function(){ try{ return localStorage.getItem('maze_theme')||'dark'; 
 })();
 
 // ---------- init ----------
-load(); render();
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){ renderLogin(); return; }
+  const {data:prof}=await sb.from('st_profiles').select('*').eq('id',session.user.id).maybeSingle();
+  if(!prof){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
+  ME={id:prof.id,role:prof.role,name:prof.name,org_id:prof.org_id}; IS_ADMIN=prof.role==='admin';
+  // Detección super-admin (un único fetch tras el login): 200 en
+  // /api/platform/settings = super-admin → se muestra el ítem Plataforma.
+  // Cualquier otro status o error de red → queda oculto, silencioso
+  // (fail-closed, mismo espíritu que ORGS_ALLOWED). Best-effort: no bloquea el boot.
+  fetch('/api/platform/settings',{headers:{'Authorization':'Bearer '+session.access_token}})
+    .then(async (res)=>{
+      if(!res.ok) return;
+      const data=await res.json().catch(()=>null);
+      if(!data) return;
+      IS_SUPER=true; PLAT_SETTINGS=data;
+      const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
+    })
+    .catch(()=>{ /* fail-closed: el ítem queda oculto */ });
+  // Retorno del flujo OAuth de GHL (query params que deja el callback de la mini-API).
+  const qs=new URLSearchParams(location.search);
+  if(qs.get('ghl')==='connected'){
+    toast('HighLevel conectado ✅');
+    history.replaceState(null,'',location.pathname);
+  } else if(qs.get('ghl_error')==='location_mismatch'){
+    GHL_MISMATCH=true;
+    toast('Autorizaste otra subcuenta de HighLevel');
+    history.replaceState(null,'',location.pathname);
+  } else if(qs.get('ghl_error')){
+    toast(qs.get('ghl_error')==='state' ? 'El enlace expiró, intentá conectar de nuevo' : 'No se pudo conectar con HighLevel');
+    history.replaceState(null,'',location.pathname);
+  }
+  await loadFromSupabase();
+  state.capMember = IS_ADMIN ? (DB.members[0]&&DB.members[0].id) : ME.id;
+  state.tblMember = state.capMember;
+  document.getElementById('loginOv') && (document.getElementById('loginOv').style.display='none');
+  document.querySelector('.app').style.display='';
+  render();
+}
+function renderLogin(msg){
+  document.querySelector('.app').style.display='none';
+  let ov=document.getElementById('loginOv'); if(!ov){ ov=document.createElement('div'); ov.id='loginOv'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(900px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--onyx)';
+  ov.innerHTML=`<form onsubmit="return doLogin(event)" style="width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:30px 28px;box-shadow:0 30px 90px rgba(0,0,0,.5)">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:18px"><div class="brand" style="width:34px;height:34px;margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/></svg></div><b style="font-family:Fraunces,serif;font-weight:500;font-size:18px">Maze Sales Tracker</b></div>
+    <h2 style="font-family:Fraunces,serif;font-weight:500;font-size:21px;margin-bottom:4px">Entrá a tu cuenta</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:18px">Cargá y mirá los números de tu equipo.</p>
+    ${msg?`<div style="background:rgba(242,85,90,.1);border:1px solid rgba(242,85,90,.3);color:var(--danger);font-size:12.5px;padding:9px 11px;border-radius:9px;margin-bottom:12px">${esc(msg)}</div>`:''}
+    <input class="inp" id="lg_email" type="email" placeholder="Email" autocomplete="username" required style="margin-bottom:10px">
+    <input class="inp" id="lg_pass" type="password" placeholder="Contraseña" autocomplete="current-password" required style="margin-bottom:16px">
+    <button class="btn" type="submit" id="lg_btn" style="width:100%">Entrar</button>
+    <div id="lg_hint" style="color:var(--danger);font-size:12.5px;margin-top:10px;min-height:16px"></div>
+  </form>`;
+  ov.style.display='flex';
+}
+window.doLogin=async(ev)=>{ ev.preventDefault();
+  const email=document.getElementById('lg_email').value.trim(), pass=document.getElementById('lg_pass').value;
+  const btn=document.getElementById('lg_btn'); btn.textContent='Entrando…'; btn.disabled=true;
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){ document.getElementById('lg_hint').textContent='Email o contraseña incorrectos.'; btn.textContent='Entrar'; btn.disabled=false; return false; }
+  await boot(); return false;
+};
+window.doLogout=async()=>{ await sb.auth.signOut(); location.reload(); };
+boot();
 </script>
 </body>
 </html>
