@@ -2196,6 +2196,32 @@ async function refreshCuotas(){
 }
 function moneyFull(n){ return '$'+(+n||0).toLocaleString('es'); }
 function cuotaEstado(c){ if(c.status==='pagada') return 'pagada'; return c.due_date<todayStr()?'vencida':'pendiente'; }
+// Pacing de la meta de caja: SIEMPRE sobre el mes calendario en curso,
+// sin importar el selector de período de la vista (la meta es mensual).
+function metaCajaBlock(){
+  const meta=+((DB.goals.month||{}).caja)||0;
+  if(!meta) return '';
+  const rm=range('month', parseD(todayStr()));
+  const inM=(d)=>d>=rm.start&&d<=rm.end;
+  const front=DB.sales.filter(s=>inM(s.date)).reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const back=(DB.cuotas||[]).filter(c=>c.status==='pagada'&&c.paid_date&&inM(c.paid_date)).reduce((a,c)=>a+(+c.paid_amount||0),0);
+  const cobrado=front+back;
+  const today=parseD(todayStr());
+  const diasMes=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+  const rest=diasMes-today.getDate();
+  const pctReal=cobrado/meta*100;
+  const pct=Math.min(100,Math.round(pctReal));
+  const pctMes=today.getDate()/diasMes*100;
+  const done=cobrado>=meta;
+  const chip=done?`<span class="cuo-est paga">Meta cumplida 🎉</span>`:(pctReal>=pctMes?`<span class="cuo-est paga">Adelantado</span>`:`<span class="cuo-est venc">Atrasado</span>`);
+  const ritmo=done?'':` · necesitás ${moneyFull(Math.ceil((meta-cobrado)/Math.max(rest,1)))}/día`;
+  return `<div class="section"><div class="eyebrow">Meta de caja · ${MONTHS[today.getMonth()]} ${today.getFullYear()} ${info('Cobrado del mes (front + back) contra la meta fijada en Metas. Adelantado/Atrasado compara tu % cobrado con el % del mes ya transcurrido.')}</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+      <b style="font-size:18px">${moneyFull(cobrado)}</b><span style="color:var(--muted)">de ${moneyFull(meta)} · ${pct}%${done?'':` · quedan ${rest} días`}${ritmo}</span>${chip}
+    </div>
+    <div style="height:10px;border-radius:20px;background:rgba(127,127,127,.18);overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--accent,#C5FF49)"></div></div>
+  </div>`;
+}
 // Solo con la base 'cobrado': desglose de comisiones por closer del período visible.
 function comisionesBlock(r){
   if((DB.team.commission_base||'contador')!=='cobrado') return '';
@@ -2250,6 +2276,7 @@ function renderCaja(){
   const filtros=Object.keys(FL).map(x=>`<button class="chip" style="${f===x?'border-color:var(--accent,#C5FF49);color:var(--accent,#C5FF49)':''}" onclick="setCajaF('${x}')">${FL[x]}</button>`).join('');
   VIEW.innerHTML = topbar(periodControls()) + `<div class="eyebrow">Caja</div><h2 class="view">Cash del front, cuotas del back</h2>
     ${adminNotice()}
+    ${metaCajaBlock()}
     <div class="cards-mini section">
       ${mini('Caja front '+info('Cash collected + reservas de las ventas del período (por fecha de venta).'),moneyFull(front))}
       ${mini('Caja back '+info('Cuotas cobradas en el período (por fecha real de cobro).'),moneyFull(back))}
