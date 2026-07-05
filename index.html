@@ -185,6 +185,18 @@
   .list{display:flex;flex-direction:column;gap:9px}
   .li{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
   .li .who{font-size:14px;font-weight:600}
+
+  /* combobox — buscador de subcuentas (Plataforma). Solo tokens: sirve en ambos temas */
+  .cbx-wrap{position:relative}
+  .cbx-panel{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:60;max-height:320px;overflow-y:auto;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:6px}
+  .cbx-head{font-size:11.5px;color:var(--muted);padding:6px 10px 8px;border-bottom:1px solid var(--line);margin-bottom:4px}
+  .cbx-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer;border:1px solid transparent}
+  .cbx-item.hl{background:var(--surface);border-color:var(--lima)}
+  .cbx-item.off{opacity:.45;cursor:default}
+  .cbx-ava{width:28px;height:28px;border-radius:50%;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--ink);flex:none}
+  .cbx-name{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .cbx-meta{font-size:11.5px;color:var(--muted)}
+  .cbx-badge{margin-left:auto;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:100px;padding:2px 8px;white-space:nowrap}
   .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:100px;text-transform:capitalize}
   .pill.setter{background:rgba(108,92,231,.16);color:#a99bff}
   .pill.triage{background:rgba(245,177,76,.14);color:var(--amber)}
@@ -1345,8 +1357,17 @@ let IS_SUPER=false, PLAT_SETTINGS=null;
 let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
 // Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
 // resultados de la última búsqueda (para pickear por índice sin inyectar
-// datos de GHL en atributos onclick) + timer del debounce.
+// datos de GHL en atributos onclick) + timer del debounce + estado del
+// combobox (total server, índice highlighteado, abierto, listener de document).
 let PLAT_LOC_SEL=null, PLAT_LOC_RESULTS=[], _locT;
+let PLAT_LOC_TOTAL=0, PLAT_LOC_HL=-1, PLAT_LOC_OPEN=false, _locDocL=null;
+// Iniciales de las dos primeras palabras (avatar del combobox); fallback '?'.
+function locInitials(name){
+  const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length) return '?';
+  return parts.slice(0,2).map(p=>p[0]).join('').toUpperCase();
+}
+function locShortId(id){ return String(id||'').slice(0,8); }
 async function loadOrgs(){
   if(ORGS_LOADING) return;
   ORGS_LOADING=true;
@@ -1406,11 +1427,13 @@ function orgsCard(){
   // que pinta SOLO #platLocResults (nunca re-render completo: se pierde el foco).
   const locField=PLAT_LOC_SEL
     ? `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
-        <div><button class="chip" type="button" onclick="clearPlatLoc()" data-tip="Quitar la subcuenta elegida">${esc(PLAT_LOC_SEL.name)} ✕</button></div>
+        <div><button class="chip" type="button" onclick="clearPlatLoc()" data-tip="Quitar la subcuenta elegida"><span class="cbx-ava" style="width:22px;height:22px;font-size:10px">${esc(locInitials(PLAT_LOC_SEL.name))}</span> ${esc(PLAT_LOC_SEL.name)} <span class="k">${esc(locShortId(PLAT_LOC_SEL.id))}</span> ✕</button></div>
       </div>`
     : `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
-        <input class="inp" id="platLocQ" placeholder="Buscar subcuenta de tu agencia…" autocomplete="off" oninput="platLocSearch(this.value)">
-        <div id="platLocResults"></div>
+        <div class="cbx-wrap" id="platLocWrap">
+          <input class="inp" id="platLocQ" placeholder="Buscar subcuenta de tu agencia…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" oninput="platLocSearch(this.value)" onfocus="platLocFocus()" onkeydown="platLocKey(event)">
+          <div class="cbx-panel" id="platLocResults" role="listbox" style="display:none"></div>
+        </div>
       </div>`;
   const form=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px">
     <b style="font-size:13px;display:block;margin:0 0 8px">Nueva organización</b>
@@ -1425,43 +1448,98 @@ function orgsCard(){
   </div>`;
   return `<div class="section"><div class="eyebrow">Organizaciones</div>${credBox}${tableBox}${form}</div>`;
 }
-// Buscador de subcuentas: debounce 400ms → GET /api/platform/locations?q= →
-// pinta SOLO #platLocResults. Todo dato de GHL pasa por esc() antes del
-// innerHTML; el click se resuelve por índice sobre PLAT_LOC_RESULTS (jamás se
-// inyectan name/id de GHL en un atributo onclick).
-window.platLocSearch=(q)=>{
-  clearTimeout(_locT);
-  _locT=setTimeout(async ()=>{
-    const box=document.getElementById('platLocResults');
-    if(!box) return;
-    const { data:{ session } } = await sb.auth.getSession();
-    if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
-    let res, data;
-    try{
-      res=await fetch('/api/platform/locations?q='+encodeURIComponent(q||''),{headers:{'Authorization':'Bearer '+session.access_token}});
-      data=await res.json().catch(()=>({}));
-    }catch(e){ box.innerHTML=`<div class="empty">No se pudo conectar con el servidor</div>`; return; }
-    if(!res.ok){
-      // 409 = falta configurar el token de agencia: mostrar el error del backend como hint.
-      box.innerHTML=`<div class="empty">${esc(data.error||'No se pudieron buscar las subcuentas')}</div>`;
-      return;
+// Combobox de subcuentas: el foco abre el panel (q vacío = explorar todas —
+// el cache server de 5 min lo hace barato); tipear usa debounce 400ms → GET
+// /api/platform/locations?q= → pinta SOLO #platLocResults (nunca re-render
+// completo: se pierde el foco del input). Todo dato de GHL pasa por esc()
+// antes del innerHTML; click/Enter se resuelven por índice sobre
+// PLAT_LOC_RESULTS (jamás se inyectan name/id de GHL en un atributo onclick).
+async function platLocFetch(q){
+  const box=document.getElementById('platLocResults');
+  if(!box) return;
+  box.style.display='';
+  box.innerHTML=`<div class="empty" style="padding:10px">Buscando…</div>`;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/platform/locations?q='+encodeURIComponent(q||''),{headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ box.innerHTML=`<div class="empty" style="padding:10px">No se pudo conectar con el servidor</div>`; return; }
+  if(!res.ok){
+    // 409 = falta configurar el token de agencia: mostrar el error del backend como hint.
+    box.innerHTML=`<div class="empty" style="padding:10px">${esc(data.error||'No se pudieron buscar las subcuentas')}</div>`;
+    return;
+  }
+  const locs=data.locations||[];
+  PLAT_LOC_TOTAL=data.total ?? locs.length;
+  // Vinculadas AL FINAL (estable: libres primero en su orden, vinculadas después).
+  // El índice de click/Enter apunta a ESTE array reordenado.
+  PLAT_LOC_RESULTS=[...locs.filter(l=>!l.linked_org), ...locs.filter(l=>l.linked_org)];
+  PLAT_LOC_HL=PLAT_LOC_RESULTS.findIndex(l=>!l.linked_org); // -1 si no hay seleccionables
+  platLocPaint();
+}
+window.platLocSearch=(q)=>{ clearTimeout(_locT); _locT=setTimeout(()=>platLocFetch(q),400); };
+function platLocPaint(){
+  const box=document.getElementById('platLocResults');
+  if(!box) return;
+  box.style.display='';
+  if(!PLAT_LOC_RESULTS.length){ box.innerHTML=`<div class="empty" style="padding:10px">No hay subcuentas que coincidan</div>`; return; }
+  const n=PLAT_LOC_RESULTS.length;
+  const hint=PLAT_LOC_TOTAL>n?' — seguí escribiendo para afinar':'';
+  const head=`<div class="cbx-head">Mostrando ${n} de ${PLAT_LOC_TOTAL} subcuentas${hint}</div>`;
+  box.innerHTML=head+PLAT_LOC_RESULTS.map((l,i)=>{
+    const ava=`<span class="cbx-ava">${esc(locInitials(l.name))}</span>`;
+    const meta=[l.city,l.country,locShortId(l.id)].filter(Boolean).join(' · ');
+    const col=`<div><div class="cbx-name">${esc(l.name)}</div>${meta?`<div class="cbx-meta">${esc(meta)}</div>`:''}</div>`;
+    if(l.linked_org){
+      return `<div class="cbx-item off" id="cbxi-${i}">${ava}${col}<span class="cbx-badge">vinculada a ${esc(l.linked_org)}</span></div>`;
     }
-    PLAT_LOC_RESULTS=data.locations||[];
-    if(!PLAT_LOC_RESULTS.length){ box.innerHTML=`<div class="empty">Sin resultados</div>`; return; }
-    box.innerHTML=PLAT_LOC_RESULTS.map((l,i)=>{
-      const meta=[l.city,l.country].filter(Boolean).join(', ');
-      const metaHtml=meta?` <span style="color:var(--muted);font-size:12px">· ${esc(meta)}</span>`:'';
-      if(l.linked_org){
-        return `<div class="li" style="opacity:.45;margin-top:6px">${esc(l.name)}${metaHtml}<span style="color:var(--muted);font-size:12px">ya vinculada a ${esc(l.linked_org)}</span></div>`;
-      }
-      return `<div class="li" style="cursor:pointer;margin-top:6px" onclick="pickPlatLoc(${i})">${esc(l.name)}${metaHtml}</div>`;
-    }).join('');
-  },400);
+    return `<div class="cbx-item${i===PLAT_LOC_HL?' hl':''}" id="cbxi-${i}" role="option" onclick="pickPlatLoc(${i})">${ava}${col}</div>`;
+  }).join('');
+}
+window.platLocFocus=()=>{
+  const box=document.getElementById('platLocResults'), inp=document.getElementById('platLocQ');
+  if(!box||!inp) return;
+  PLAT_LOC_OPEN=true;
+  box.style.display='';
+  inp.setAttribute('aria-expanded','true');
+  platLocFetch(inp.value||''); // sin debounce: explorar de inmediato al foco
+  if(!_locDocL){
+    _locDocL=(e)=>{ const w=document.getElementById('platLocWrap'); if(!w||!w.contains(e.target)) platLocClose(); };
+    document.addEventListener('pointerdown',_locDocL);
+  }
+};
+window.platLocClose=()=>{
+  const box=document.getElementById('platLocResults'), inp=document.getElementById('platLocQ');
+  if(box) box.style.display='none';
+  if(inp) inp.setAttribute('aria-expanded','false');
+  PLAT_LOC_OPEN=false; PLAT_LOC_HL=-1;
+  // Cleanup obligatorio: nunca acumular listeners entre aperturas/re-renders.
+  if(_locDocL){ document.removeEventListener('pointerdown',_locDocL); _locDocL=null; }
+};
+window.platLocKey=(e)=>{
+  if(!PLAT_LOC_OPEN){ if(e.key==='ArrowDown'){ e.preventDefault(); platLocFocus(); } return; }
+  if(e.key==='Escape'){ platLocClose(); return; }
+  if(e.key==='Enter'){ e.preventDefault(); if(PLAT_LOC_HL>=0) pickPlatLoc(PLAT_LOC_HL); return; }
+  if(e.key!=='ArrowDown' && e.key!=='ArrowUp') return;
+  e.preventDefault();
+  // Las vinculadas están al final: el rango seleccionable es el prefijo [0, lastFree].
+  let lastFree=-1;
+  for(let i=0;i<PLAT_LOC_RESULTS.length;i++){ if(!PLAT_LOC_RESULTS[i].linked_org) lastFree=i; else break; }
+  if(lastFree<0) return;
+  if(PLAT_LOC_HL<0) PLAT_LOC_HL=0;
+  else if(e.key==='ArrowDown') PLAT_LOC_HL=Math.min(PLAT_LOC_HL+1,lastFree); // tope, sin wrap
+  else PLAT_LOC_HL=Math.max(PLAT_LOC_HL-1,0);
+  platLocPaint();
+  const el=document.getElementById('cbxi-'+PLAT_LOC_HL);
+  if(el) el.scrollIntoView({block:'nearest'});
 };
 window.pickPlatLoc=(i)=>{
   const l=PLAT_LOC_RESULTS[i];
   if(!l || l.linked_org) return;
   PLAT_LOC_SEL={id:l.id, name:l.name};
+  platLocClose(); // limpia el listener de document ANTES del re-render (que destruye el panel)
   renderPlatform();
 };
 window.clearPlatLoc=()=>{ PLAT_LOC_SEL=null; renderPlatform(); };
