@@ -46,7 +46,7 @@ Función nueva `closerPayoutBase(memberId, start, end)` que devuelve `{front, ba
 ## Casos borde
 
 - Venta sin `closer_id` → no comisiona a nadie (ni front ni sus cuotas).
-- Cuota cobrada de una venta de un closer dado de baja → aparece igual en el bloque de Caja (el histórico no se pierde); en Configuraciones no (solo miembros activos, como hoy).
+- El bloque de Caja y Configuraciones muestran **solo closers activos** (como todo el resto de la app). Las comisiones de un closer dado de baja quedan fuera de alcance v1.
 - Cambio de % → recalcula sobre el período visible; no hay histórico de % (igual que hoy).
 - Toggle OFF en una org que nunca lo tocó → cero cambios de comportamiento (default `'contador'`).
 
