@@ -1315,6 +1315,138 @@ window.submitPassword=async (ev)=>{
   }
   return false;
 };
+
+// ---------- Organizaciones (SOLO super-admins de Maze) ----------
+// ORGS_ALLOWED: null = todavía no se consultó, false = 401/403 u otro error
+// (fail-closed: no se renderiza NADA, ni el título), true = super-admin.
+// ORG_CREATED: credenciales del último alta — viven SOLO en memoria hasta que
+// se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
+let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
+async function loadOrgs(){
+  if(ORGS_LOADING) return;
+  ORGS_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ ORGS_ALLOWED=false; return; }
+    const res=await fetch('/api/orgs',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    if(res.ok && data){ ORGS=data.orgs||[]; ORGS_ALLOWED=true; }
+    // 401/403 y cualquier otro error → fail-closed, silencioso: un admin normal
+    // no debe enterarse de que la sección existe.
+    else{ ORGS_ALLOWED=false; }
+  }catch(e){ ORGS_ALLOWED=false; }
+  finally{ ORGS_LOADING=false; if(state.view==='team') renderTeam(); }
+}
+function orgsCard(){
+  if(ORGS_ALLOWED===false) return '';
+  if(ORGS_ALLOWED===null){ loadOrgs(); return ''; }
+  // (a) Box de credenciales del último alta (un solo uso).
+  let credBox='';
+  if(ORG_CREATED){
+    const passHtml = ORG_CREATED.existing
+      ? `<div style="font-size:13px;margin-top:3px">Ya tenía cuenta — entra con su contraseña de siempre</div>`
+      : (ORG_CREATED.password ? `<div style="font-size:13px;margin-top:3px">Contraseña: <span class="ghl-code-val" style="font-size:14px">${esc(ORG_CREATED.password)}</span></div>` : '');
+    credBox=`<div class="ghl-code" style="align-items:flex-start">
+      <div>
+        <b style="font-size:13.5px">${esc(ORG_CREATED.name)}</b>
+        <div style="font-size:13px;margin-top:6px">URL: <span class="ghl-code-val" style="font-size:14px">${esc(location.origin)}</span></div>
+        <div style="font-size:13px;margin-top:3px">Email: <span class="ghl-code-val" style="font-size:14px">${esc(ORG_CREATED.email)}</span></div>
+        ${passHtml}
+        <p class="ghl-code-txt" style="margin-top:8px">⚠️ Guardá estas credenciales ahora: no se vuelven a mostrar.</p>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn ghost sm" onclick="copyOrgCreds()">Copiar</button>
+        <button class="btn ghost sm" onclick="closeOrgCreds()" data-tip="Cerrar (las credenciales no se vuelven a mostrar)">✕</button>
+      </div>
+    </div>`;
+  }
+  // (b) Tabla de organizaciones.
+  let tableBox='';
+  if(!(ORGS||[]).length){
+    tableBox=`<div class="empty">Sin organizaciones todavía.</div>`;
+  } else {
+    const rows=ORGS.map(o=>`<tr>
+      <td style="text-align:left">${esc(o.name||'—')}</td>
+      <td>${+o.members_active||0}</td>
+      <td style="text-align:left">${o.ghl_connected?esc(o.ghl_location_name||'Conectado'):'—'}</td>
+      <td style="text-align:left">${(o.admins&&o.admins.length)?o.admins.map(a=>esc(a)).join(', '):'—'}</td>
+    </tr>`).join('');
+    tableBox=`<div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Nombre</th><th>Miembros</th><th style="text-align:left">HighLevel</th><th style="text-align:left">Admins</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+  // (c) Form de alta.
+  const form=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px">
+    <b style="font-size:13px;display:block;margin:0 0 8px">Nueva organización</b>
+    <div class="grid2">
+      <div class="field"><label>Nombre de la organización</label><input class="inp" id="orgName" placeholder="Ej: Camino Digital"></div>
+      <div class="field"><label>Nombre del admin</label><input class="inp" id="orgAdminName" placeholder="Ej: Clara"></div>
+      <div class="field"><label>Email del admin</label><input class="inp" id="orgAdminEmail" type="email" placeholder="admin@email.com"></div>
+      <div class="field"><label>Contraseña</label><input class="inp" id="orgAdminPass" type="text" placeholder="dejá vacío para autogenerar"></div>
+    </div>
+    <button class="btn" onclick="createOrg()" ${ORG_CREATING?'disabled':''}>${ORG_CREATING?'Creando…':'Crear organización'}</button>
+  </div>`;
+  return `<div class="section"><div class="eyebrow">Organizaciones</div>${credBox}${tableBox}${form}</div>`;
+}
+window.createOrg=async ()=>{
+  if(ORG_CREATING) return;
+  const name=(document.getElementById('orgName').value||'').trim();
+  const adminName=(document.getElementById('orgAdminName').value||'').trim();
+  const adminEmail=(document.getElementById('orgAdminEmail').value||'').trim();
+  const pass=(document.getElementById('orgAdminPass').value||'').trim();
+  if(!name){ toast('Tienes que poner el nombre de la organización'); return; }
+  if(!adminName){ toast('Tienes que poner el nombre del admin'); return; }
+  if(!adminEmail){ toast('Tienes que poner el email del admin'); return; }
+  if(pass && pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  ORG_CREATING=true;
+  if(state.view==='team') renderTeam();
+  const body={name, admin_name:adminName, admin_email:adminEmail};
+  if(pass) body.admin_password=pass;
+  let res, data;
+  try{
+    res=await fetch('/api/orgs',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    ORG_CREATING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='team') renderTeam();
+    return;
+  }
+  ORG_CREATING=false;
+  if(res.ok){
+    // La contraseña vive SOLO acá (memoria) hasta cerrar el box — jamás en
+    // localStorage ni en logs.
+    ORG_CREATED={ name:(data.org&&data.org.name)||name, email:data.admin_email||adminEmail, password:data.admin_password||null, existing:!!data.existing_account };
+    toast('Organización creada');
+    // Refrescar la tabla re-disparando el fetch. El box ORG_CREATED sobrevive
+    // al refresh porque es estado aparte.
+    ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error || 'No se pudo crear la organización');
+    if(state.view==='team') renderTeam();
+  }
+};
+window.copyOrgCreds=async ()=>{
+  if(!ORG_CREATED) return;
+  const lines=[location.origin, ORG_CREATED.email];
+  if(ORG_CREATED.password) lines.push(ORG_CREATED.password);
+  const text=lines.join('\n');
+  try{
+    await navigator.clipboard.writeText(text);
+  }catch(e){
+    // Fallback para contextos sin Clipboard API (http, browsers viejos).
+    const ta=document.createElement('textarea');
+    ta.value=text; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(err){}
+    document.body.removeChild(ta);
+  }
+  toast('Credenciales copiadas');
+};
+window.closeOrgCreds=()=>{ ORG_CREATED=null; renderTeam(); };
+
 function renderTeam(){
   const ro = !IS_ADMIN;
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
@@ -1364,7 +1496,7 @@ function renderTeam(){
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     ${addMemberBox}
-    ${ghlCard()}${ghlTeamCard()}` + footer();
+    ${ghlCard()}${ghlTeamCard()}${orgsCard()}` + footer();
 }
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
