@@ -1032,14 +1032,14 @@ window.disconnectGhl=async ()=>{
     res=await fetch('/api/integrations/ghl',{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
     data=await res.json().catch(()=>({}));
   }catch(e){ toast('No se pudo conectar con el servidor'); return; }
-  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_USERS=null; GHL_REMOVED=[]; renderTeam(); }
+  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; renderTeam(); }
   else{ toast(data.error || 'No se pudo desconectar'); }
 };
 
 // ---------- Equipo desde HighLevel (Fase 2) ----------
-// Lista de usuarios de la subcuenta GHL (null = todavía no se cargó) + bajas
-// automáticas de la última reconciliación. Solo visible para el admin con org conectada.
-let GHL_USERS=null, GHL_USERS_LOADING=false, GHL_REMOVED=[];
+// Lista de usuarios de la subcuenta GHL (null = todavía no se cargó) + bajas y
+// auto-vinculaciones de la última reconciliación. Solo visible para el admin con org conectada.
+let GHL_USERS=null, GHL_USERS_LOADING=false, GHL_REMOVED=[], GHL_AUTO_LINKED=[];
 const GHL_STATUS_CHIP={nuevo:['Nuevo','st-nuevo'],vinculable:['Vinculable','st-vinculable'],importado:['Importado','st-importado'],inactivo:['Inactivo','st-inactivo']};
 const GHL_STATUS_ACTION={nuevo:'Importar',vinculable:'Vincular',inactivo:'Reactivar'};
 function ghlTeamCard(){
@@ -1057,6 +1057,12 @@ function ghlTeamCard(){
   if(GHL_REMOVED.length){
     const n=GHL_REMOVED.length;
     removedBox=`<div class="admin-lock">⚠️ <span>Se ${n===1?'dio de baja 1 miembro que ya no está':'dieron de baja '+n+' miembros que ya no están'} en HighLevel: <b>${GHL_REMOVED.map(x=>esc(x)).join(', ')}</b></span></div>`;
+  }
+  // (c2) Aviso de auto-vinculaciones por email (reconciliación total).
+  let autoLinkedBox='';
+  if(GHL_AUTO_LINKED.length){
+    const n=GHL_AUTO_LINKED.length;
+    autoLinkedBox=`<div class="admin-lock">🔗 <span>Se ${n===1?'vinculó automáticamente':'vincularon automáticamente'} con su usuario de HighLevel: <b>${GHL_AUTO_LINKED.map(x=>esc(x)).join(', ')}</b></span></div>`;
   }
   // (b) Botón de carga / tabla de usuarios GHL.
   const loadBtn=(cls)=>`<button class="btn ${cls}" onclick="loadGhlUsers()" ${GHL_USERS_LOADING?'disabled':''}>${GHL_USERS_LOADING?'Cargando…':(GHL_USERS===null?'Cargar usuarios de HighLevel':'Actualizar lista')}</button>`;
@@ -1086,7 +1092,7 @@ function ghlTeamCard(){
       <tbody>${rows}</tbody></table></div>
       <div style="margin-top:10px">${loadBtn('ghost sm')}</div>`;
   }
-  return `<div class="section"><div class="eyebrow">Equipo desde HighLevel</div>${codeBox}${removedBox}${listBox}</div>`;
+  return `<div class="section"><div class="eyebrow">Equipo desde HighLevel</div>${codeBox}${autoLinkedBox}${removedBox}${listBox}</div>`;
 }
 window.copyGhlAccessCode=async ()=>{
   const code=(GHL_STATUS&&GHL_STATUS.location_id)||'';
@@ -1123,8 +1129,9 @@ window.loadGhlUsers=async ()=>{
   if(res.ok){
     GHL_USERS=data.users||[];
     GHL_REMOVED=data.removed||[];
-    // Las bajas automáticas cambian el equipo local: recargar miembros.
-    if(GHL_REMOVED.length) await loadFromSupabase();
+    GHL_AUTO_LINKED=data.auto_linked||[];
+    // Bajas y auto-vinculaciones cambian el equipo local: recargar miembros.
+    if(GHL_REMOVED.length || GHL_AUTO_LINKED.length) await loadFromSupabase();
   } else {
     toast(data.error || 'No se pudo cargar la lista de HighLevel');
   }
