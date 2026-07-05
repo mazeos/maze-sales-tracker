@@ -373,6 +373,9 @@ async function deletePlatformSetting(key) {
 // Refresca el access_token de GHL si está por vencer (a menos de 5 min).
 // Queda listo para las fases siguientes de sync; hoy ninguna ruta crítica lo consume.
 async function refreshGhlToken(integration) {
+  // Guard defensivo: una fila pre-vinculada (pending) no tiene tokens — jamás
+  // postear refresh_token: undefined a GHL.
+  if (!integration.refresh_token) throw new Error('Integración sin tokens (pendiente de autorizar)');
   const expiresAt = integration.token_expires_at ? new Date(integration.token_expires_at).getTime() : 0;
   if (expiresAt - Date.now() >= 5 * 60 * 1000) {
     return integration.access_token; // todavía sirve, no hace falta refresh
@@ -426,7 +429,9 @@ async function refreshGhlToken(integration) {
 // llamada a getIntegration. OJO: la fila incluye tokens — jamás pasarla al browser.
 async function getGhlCreds(orgId) {
   const integration = await getIntegration(orgId);
-  if (integration) {
+  // Fila pre-vinculada SIN tokens (pending) = NO conectada: cae al fallback
+  // env PIT o null, como si no hubiera integración.
+  if (integration && integration.access_token) {
     return { token: await refreshGhlToken(integration), locationId: integration.location_id, integration };
   }
   if (GHL_PIT && GHL_LOCATION) {
@@ -936,6 +941,15 @@ async function oauthCallback(req, res, url) {
     return redirect(res, PUBLIC_URL + '/?ghl_error=token');
   }
 
+  // 3b. Guard de pre-vínculo: si la org tiene una subcuenta pre-asignada y el
+  // admin autorizó OTRA, NO se guarda nada — el pre-vínculo solo puede
+  // completarse con la subcuenta asignada. Logs con IDs, jamás tokens.
+  const existing = await getIntegration(orgId);
+  if (existing && existing.location_id && existing.location_id !== tok.locationId) {
+    console.log(`[api] GET /api/oauth/callback org=${orgId} location_mismatch esperada=${existing.location_id} autorizada=${tok.locationId} -> redirect ghl_error=location_mismatch`);
+    return redirect(res, PUBLIC_URL + '/?ghl_error=location_mismatch');
+  }
+
   // 4. Nombre de la subcuenta (best-effort: si falla, usamos el locationId).
   let locationName = tok.locationId;
   try {
@@ -981,14 +995,15 @@ async function oauthCallback(req, res, url) {
 }
 
 // ---------- GET /api/integrations/ghl ----------
-// Estado de conexión para la UI. NUNCA incluye access_token/refresh_token:
-// el select pide solo las columnas públicas.
+// Estado de conexión para la UI. El access_token se lee SOLO server-side para
+// distinguir pending (fila pre-vinculada sin tokens) de conectada — JAMÁS
+// viaja en la respuesta.
 async function getGhlStatus(req, res, admin) {
   let rows;
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id)
-        + '&select=location_id,location_name,created_at',
+        + '&select=location_id,location_name,created_at,access_token',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) {
@@ -1001,6 +1016,15 @@ async function getGhlStatus(req, res, admin) {
 
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return sendJSON(res, 200, { connected: false });
+  // Fila sin access_token = subcuenta pre-asignada, falta autorizar (pending).
+  if (!row.access_token) {
+    return sendJSON(res, 200, {
+      connected: false,
+      pending: true,
+      location_id: row.location_id,
+      location_name: row.location_name,
+    });
+  }
   return sendJSON(res, 200, {
     connected: true,
     location_id: row.location_id,
@@ -1109,7 +1133,8 @@ function ghlUserName(u) {
 // Los perfiles con role='admin' NUNCA se dan de baja automáticamente.
 async function listGhlUsers(req, res, admin) {
   const integration = await getIntegration(admin.org_id);
-  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+  // Una fila pending (sin access_token) todavía no puede listar usuarios.
+  if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
   let ghlUsers;
   try {
@@ -1281,7 +1306,8 @@ async function importGhlUser(req, res, admin) {
   if (!GHL_IMPORT_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage, closer o admin' });
 
   const integration = await getIntegration(admin.org_id);
-  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+  // Una fila pending (sin access_token) todavía no puede importar usuarios.
+  if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
   let ghlUsers;
   try {
@@ -1618,6 +1644,7 @@ async function createOrg(req, res, sa) {
   const adminName = typeof body.admin_name === 'string' ? body.admin_name.trim() : '';
   const adminEmail = typeof body.admin_email === 'string' ? body.admin_email.trim() : '';
   let password = typeof body.admin_password === 'string' ? body.admin_password : '';
+  const locationId = typeof body.location_id === 'string' ? body.location_id.trim() : '';
 
   // Validaciones (mensajes en español latino, tuteo).
   if (!name) return sendJSON(res, 400, { error: 'Tienes que poner el nombre de la organización' });
@@ -1638,6 +1665,53 @@ async function createOrg(req, res, sa) {
     }
     password = acc.slice(0, 14);
     generated = true;
+  }
+
+  // Pre-vínculo de subcuenta (opcional): validaciones fail-fast ANTES de crear
+  // la org, así no se complica el rollback existente. JAMÁS se confía en el
+  // body: la location tiene que existir en la agencia y no estar ya vinculada.
+  let locationName = null;
+  if (locationId) {
+    // 1. PIT de agencia configurado.
+    const pit = await getPlatformSetting(PIT_KEY);
+    if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
+
+    // 2. La location existe en la agencia (resultado completo, sin el slice de 20).
+    let allLocations;
+    try {
+      allLocations = await searchAgencyLocations(pit, '');
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+    }
+    const loc = allLocations.find((l) => l.id === locationId);
+    if (!loc) return sendJSON(res, 400, { error: 'Esa subcuenta no existe en tu agencia' });
+    locationName = loc.name;
+
+    // 3. NO está ya vinculada a otra org.
+    try {
+      const dupRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_integrations?location_id=eq.' + encodeURIComponent(locationId) + '&select=org_id',
+        { headers: svcHeaders() }
+      );
+      if (dupRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudo verificar la subcuenta' });
+      const dupRows = await dupRes.json().catch(() => null);
+      const dup = Array.isArray(dupRows) ? dupRows[0] : null;
+      if (dup) {
+        let orgName = dup.org_id;
+        try {
+          const oRes = await fetch(
+            SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(dup.org_id) + '&select=name',
+            { headers: svcHeaders() }
+          );
+          const oRows = oRes.status === 200 ? await oRes.json().catch(() => null) : null;
+          const oRow = Array.isArray(oRows) ? oRows[0] : null;
+          if (oRow && oRow.name) orgName = oRow.name;
+        } catch { /* best-effort: el org_id de fallback alcanza para el mensaje */ }
+        return sendJSON(res, 409, { error: 'Esa subcuenta ya está vinculada a ' + orgName });
+      }
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo verificar la subcuenta' });
+    }
   }
 
   // a. Crear la org (tz y team_mode salen de los defaults del schema).
@@ -1765,7 +1839,31 @@ async function createOrg(req, res, sa) {
   const out = { org: { id: orgId, name }, admin_email: adminEmail, existing_account: existingAccount };
   if (generated && createdAuth) out.admin_password = password;
 
-  console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} -> 200`);
+  // Pre-vínculo: fila en st_integrations SIN tokens (quedan null = pending).
+  // El OAuth del admin del tenant completa el vínculo después. Si este INSERT
+  // falla NO se aborta ni rollbackea: la org ya existe y es válida — se avisa
+  // con un warning para que el super-admin reintente o conecte por OAuth.
+  if (locationId) {
+    let linked = false;
+    try {
+      const intRes = await fetch(SUPABASE_URL + '/rest/v1/st_integrations', {
+        method: 'POST',
+        headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ org_id: orgId, provider: 'ghl', location_id: locationId, location_name: locationName }),
+      });
+      linked = intRes.status >= 200 && intRes.status < 300;
+    } catch { /* best-effort: se reporta en el warning */ }
+    if (linked) {
+      out.location_id = locationId;
+      out.location_name = locationName;
+    } else {
+      out.linked = false;
+      out.warning = 'La organización se creó pero no se pudo asignar la subcuenta. Asignala de nuevo o conectá por OAuth.';
+      console.log(`[api] POST /api/orgs super=${sa.email} prelink_fail org=${orgId} location=${locationId}`);
+    }
+  }
+
+  console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} location=${locationId || '-'} -> 200`);
   return sendJSON(res, 200, out);
 }
 
