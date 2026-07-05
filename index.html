@@ -168,6 +168,16 @@
   .field label{font-size:12px;color:var(--muted);font-weight:500}
   .inp{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink);font-size:14px;width:100%}
   .inp:focus{outline:none;border-color:var(--lima-dim)}
+  .inp:disabled{opacity:.4;cursor:not-allowed}
+  /* móvil: instructivo compacto (expandible al tocarlo), tooltips del rail ocultos */
+  @media(max-width:520px){
+    .cap-intro p{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+    .cap-intro.open p{display:block;-webkit-line-clamp:unset}
+    .nav-i .tt{display:none}
+  }
+  /* foco de teclado en la navegación */
+  .nav-i:focus-visible{outline:2px solid var(--lima);outline-offset:2px}
+
   .btn{background:var(--lima);color:var(--on-accent);border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px}
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
   .btn.sm{padding:7px 12px;font-size:13px}
@@ -334,11 +344,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/><circle cx="12" cy="10" r="1.4" fill="#C5FF49" stroke="none"/></svg>
     </div>
     <div class="nav-i" data-view="dashboard" title="Panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="tt">Panel</span></div>
+    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="nav-i" data-view="capture" title="Cargar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="tt">Cargar día</span></div>
     <div class="nav-i" data-view="table" title="Tabla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15"/></svg><span class="tt">Tabla (día por día)</span></div>
     <div class="nav-i" data-view="team" title="Configuraciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.7 7.7 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1H10.6l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.7 7.7 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h2.8l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 1.7-3z"/></svg><span class="tt">Configuraciones</span></div>
     <div class="nav-i" data-view="goals" title="Metas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="tt">Metas</span></div>
-    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
     <div class="spacer"></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
     <div class="nav-i" data-action="password" title="Cambiar mi contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg><span class="tt">Cambiar mi contraseña</span></div>
@@ -476,7 +486,7 @@ function seed(){
   const sales = [
     {id:uid(), date:todayStr(), cliente:'Facundo Guerra', programa:'High Ticket', metodo:'Transferencia', facturado:4000, cash:2000, cuotas:2, reserva:0, closer:'m_nico', triage:'m_vale', setter:'m_facu', fuente:'Instagram'},
   ];
-  return { team:{name:'Camino Digital', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
+  return { team:{name:'Agencia Demo', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
 }
 
 // ---------- Períodos ----------
@@ -558,6 +568,7 @@ const VIEW = document.getElementById('view');
 let state = { view:'dashboard', ptype:'week', ref: todayStr(), capMember:null, capDate:null };
 function go(view){ state.view=view; render(); }
 document.querySelectorAll('.nav-i').forEach(el=>{
+  el.tabIndex=0; el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); el.click(); } });
   el.addEventListener('click',()=>{
     if(el.dataset.action==='theme'){ toggleTheme(); return; }
     if(el.dataset.action==='password'){ openPasswordModal(); return; }
@@ -850,12 +861,12 @@ function renderCapture(){
           <div class="tr"><input class="money-in" type="number" min="0" value="${val}" onchange="setMoney('${mt.k}', this.value)"></div></div>`;
       } else {
         taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
-          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
+          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}" ondblclick="editNum('${mt.k}')" title="Doble clic para escribir el número">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
       }
     });
     const isToday = state.capDate===todayStr();
     body=`<div class="cap-wrap">
-      <div class="cap-intro">
+      <div class="cap-intro" onclick="this.classList.toggle('open')">
         <div class="ico">☝</div>
         <p>Tocá <b>+</b> cada vez que pasa algo (una conversación nueva, una respuesta, un link enviado…). <b>No hay botón de guardar</b>: cada toque se guarda solo al instante. Cargá solo lo que uses; el resto dejalo en 0.</p>
       </div>
@@ -890,6 +901,29 @@ window.bump=(k,dir)=>{
   const member=DB.members.find(m=>m.id===state.capMember);
   const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
   flashSave();
+};
+window.setNum=(k,val)=>{
+  const key=state.capMember+'|'+state.capDate;
+  if(!DB.entries[key]) DB.entries[key]={};
+  const v=Math.max(0,Math.round(+val||0));
+  DB.entries[key][k]=v; save();
+  const el=document.getElementById('n_'+k); if(el) el.textContent=v;
+  const member=DB.members.find(m=>m.id===state.capMember);
+  const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
+  flashSave();
+};
+window.editNum=(k)=>{
+  const el=document.getElementById('n_'+k); if(!el||el.querySelector('input')) return;
+  const cur=+el.textContent||0;
+  const inp=document.createElement('input');
+  inp.type='number'; inp.min='0'; inp.value=cur; inp.inputMode='numeric';
+  inp.style.cssText='width:66px;font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;text-align:right;background:var(--surface);color:var(--ink);border:1px solid var(--lima);border-radius:8px;padding:2px 6px;outline:none';
+  el.textContent=''; el.appendChild(inp); inp.focus(); inp.select();
+  let done=false;
+  const commit=()=>{ if(done)return; done=true; setNum(k,Math.max(0,Math.round(+inp.value||0))); };
+  const cancel=()=>{ if(done)return; done=true; el.textContent=cur; };
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();commit();} else if(e.key==='Escape'){cancel();} });
+  inp.addEventListener('blur',commit);
 };
 window.setMoney=(k,val)=>{
   const key=state.capMember+'|'+state.capDate;
@@ -1343,34 +1377,100 @@ function renderSales(){
     </div>
     <div class="section"><div class="eyebrow">Registrar venta</div>
       <div class="grid2">
-        <div class="field"><label>Cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+        <div class="field" id="s_lead_wrap" style="display:none"><label>Cliente (estuvo en llamada)</label><select class="inp" id="s_lead" onchange="document.getElementById('s_cliente_wrap').style.display=this.value==='__manual__'?'':'none'"><option value="">Cargando leads con cita…</option></select></div>
+        <div class="field" id="s_cliente_wrap"><label>Nombre del cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
         <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="High Ticket / Membresía / Lite"></div>
         <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="4000"></div>
         <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>Cantidad de pagos</label><input class="inp" id="s_cuotas" type="number" min="1" value="1"></div>
+        <div class="field"><label>Monto del primer pago ($)</label><input class="inp" id="s_primerpago" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>¿Fue reserva (seña)?</label><select class="inp" id="s_reservaflag" onchange="const r=document.getElementById('s_reserva');r.disabled=!this.value;if(!this.value)r.value='';"><option value="">No</option><option value="1">Sí</option></select></div>
+        <div class="field"><label>Monto de la reserva ($)</label><input class="inp" id="s_reserva" type="number" min="0" placeholder="500" disabled></div>
         <div class="field"><label>Fuente del lead</label><input class="inp" id="s_fuente" placeholder="Instagram / TikTok / YouTube"></div>
         <div class="field"><label>Método de pago</label><input class="inp" id="s_metodo" placeholder="Transferencia / Tarjeta"></div>
         <div class="field"><label>Closer</label><select class="inp" id="s_closer">${opt(closers)}</select></div>
-        <div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>
+        ${triages.length?`<div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>`:`<input type="hidden" id="s_triage" value="">`}
         <div class="field"><label>Setter</label><select class="inp" id="s_setter">${opt(setters)}</select></div>
       </div>
-      <button class="btn" onclick="addSale()">Registrar venta</button>
+      <button class="btn" id="s_submit" onclick="addSale()">Registrar venta</button>
     </div>
     <div class="section"><div class="eyebrow">Historial</div>
       <div class="rollup"><table>
         <thead><tr><th>Fecha</th><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Facturado</th><th>Cash</th><th style="text-align:left">Closer</th><th style="text-align:left">Fuente</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>` + footer();
+  loadGhlLeads();
 }
 function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
+
+// Trae los leads con cita reciente del calendario de admisión (vía mini-API → GHL).
+// Fallback obligatorio: sin GHL (501/error/0 leads) la vista queda en modo manual
+// — input de nombre visible y botón "Registrar venta" — sin toast de error:
+// la ausencia de GHL es un estado normal, no una falla.
+let GHL_LEADS=[];
+async function loadGhlLeads(){
+  const sel=document.getElementById('s_lead'); if(!sel) return;
+  const manualMode=()=>{
+    GHL_LEADS=[];
+    const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='none';
+    const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='';
+    const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta';
+  };
+  let j=null;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){ manualMode(); return; }
+    const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok){ manualMode(); return; }
+    j=await r.json();
+  }catch(e){ manualMode(); return; }
+  if(!j || !j.leads || !j.leads.length){ manualMode(); return; }
+  GHL_LEADS=j.leads;
+  const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
+  sel.innerHTML = `<option value="">— Elegí el lead de la llamada —</option>`
+    + GHL_LEADS.map(c=>`<option value="${esc(c.id)}">${esc(fmt(c))}</option>`).join('')
+    + `<option value="__manual__">Otro (escribir a mano, sin GHL)</option>`;
+  const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='';
+  const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='none';
+  const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta y disparar onboarding';
+}
+
 window.addSale=async()=>{
   const g=(id)=>document.getElementById(id).value;
-  const cliente=(g('s_cliente')||'').trim(); if(!cliente){ toast('Poné el cliente'); return; }
+  const leadSel=g('s_lead');
+  let cliente='', ghlId=null;
+  if(leadSel && leadSel!=='__manual__'){
+    const lead=GHL_LEADS.find(l=>l.id===leadSel);
+    cliente=lead?lead.name:''; ghlId=leadSel;
+  } else {
+    cliente=(g('s_cliente')||'').trim();
+  }
+  if(!cliente){ toast('Elegí el lead o escribí el cliente'); return; }
+  const fueReserva=!!g('s_reservaflag');
   const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
-    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:0,reserva:0,
+    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:+g('s_cuotas')||1,reserva:+g('s_reserva')||0,
+    primer_pago:+g('s_primerpago')||0,fue_reserva:fueReserva,ghl_contact_id:ghlId,
     closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
   const {data,error}=await sb.from('st_sales').insert(row).select().single();
   if(error){ toast('No se pudo (permiso)'); return; }
-  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:0,reserva:0,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
-  toast('Venta registrada'); renderSales();
+  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:row.cuotas,reserva:row.reserva,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
+
+  // Cierre del ciclo en GHL (best-effort): custom fields + tag de onboarding + oportunidad + Slack.
+  if(ghlId){
+    try{
+      const closer=DB.members.find(m=>m.id===row.closer_id);
+      const {data:{session}}=await sb.auth.getSession();
+      const r=await fetch('/api/sales/ghl',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
+        body:JSON.stringify({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
+          cuotas:row.cuotas,metodo:row.metodo,fueReserva:fueReserva,reserva:row.reserva,primerPago:row.primer_pago,
+          vendedor:closer?closer.name:''})});
+      const j=await r.json();
+      if(j.ok){ toast(fueReserva?'Reserva registrada — tag "reserva" aplicado 🔒':'Venta registrada — onboarding disparado 🎉'); }
+      else { toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+    }catch(e){ toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+  } else {
+    toast('Venta registrada');
+  }
+  renderSales();
 };
 window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); renderSales(); };
 

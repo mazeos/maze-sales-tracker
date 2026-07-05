@@ -13,6 +13,8 @@
 //   DELETE /api/integrations/ghl   -> desconecta la integración GHL de la org
 //   GET    /api/ghl/users          -> lista los usuarios de la subcuenta GHL con su estado + reconcilia bajas
 //   POST   /api/ghl/users/import   -> importa/vincula/reactiva un usuario GHL como miembro del tracker
+//   GET    /api/ghl/leads          -> leads con cita en el calendario de admisión (cualquier miembro activo)
+//   POST   /api/sales/ghl          -> cierra el ciclo de la venta en GHL: custom fields + tag + oportunidad + Slack
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 
 import http from 'node:http';
@@ -41,6 +43,43 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
 
 if (!GHL_ENABLED) {
   console.log('[api] Integración GHL no configurada (faltan GHL_CLIENT_ID/GHL_CLIENT_SECRET/PUBLIC_URL). La API arranca en modo manual.');
+}
+
+// ---------- Env vars del módulo Ventas-GHL (todas opcionales) ----------
+// GHL_PIT + GHL_LOCATION: modo "instancia dedicada" (ej. Clara) — fallback cuando
+// la org no tiene integración OAuth en st_integrations. Los IDs de custom fields
+// y del pipeline entran por env en JSON (repo público: CERO IDs en el código).
+const GHL_PIT = process.env.GHL_PIT || '';
+const GHL_LOCATION = process.env.GHL_LOCATION || '';
+const GHL_CALENDAR = process.env.GHL_CALENDAR || '';
+const SLACK_TOKEN = process.env.SLACK_TOKEN || '';
+const SLACK_WINS_CHANNEL = process.env.SLACK_WINS_CHANNEL || '';
+const GHL_BASE = 'https://services.leadconnectorhq.com';
+
+// Parseo tolerante: si el env falta o el JSON es inválido, la constante queda null
+// y el paso correspondiente se saltea en runtime. NUNCA crashear el arranque.
+function parseJsonEnv(name, aviso) {
+  const raw = process.env[name] || '';
+  if (!raw) {
+    console.log(`[api] ${name} no configurado/ inválido — se saltea el paso de ${aviso}`);
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.log(`[api] ${name} no configurado/ inválido — se saltea el paso de ${aviso}`);
+    return null;
+  }
+}
+// Claves esperadas: montoTotal, cantidadPagos, metodoPago, programa, montoReserva,
+// fueReserva, primerPago, vendedor (IDs de custom fields del contacto GHL).
+const GHL_CF = parseJsonEnv('GHL_CF_JSON', 'custom fields');
+// Claves esperadas: pipelineId, stageReserva, stagePago (pipeline de onboarding).
+const GHL_PIPELINE = parseJsonEnv('GHL_PIPELINE_JSON', 'oportunidad');
+
+// Headers para la API de GHL. El token varía por org (OAuth o PIT), por eso es parámetro.
+function ghlHeaders(token, version = '2021-07-28') {
+  return { 'Authorization': 'Bearer ' + token, 'Version': version, 'Content-Type': 'application/json' };
 }
 
 const VALID_ROLES = ['setter', 'triage', 'closer'];
@@ -150,6 +189,30 @@ function requireAdmin(req) {
   return checkAdminToken(req.headers['authorization'] || '');
 }
 
+// ---------- Auth: cualquier miembro ACTIVO del equipo (no solo admin) ----------
+// Reusa checkUserToken (JWT contra GoTrue) y lee el perfil con la service key.
+// Devuelve { ok, uid, org_id, role, name } o { ok:false, status, error }.
+async function requireMember(req) {
+  const usr = await checkUserToken(req.headers['authorization'] || '');
+  if (!usr.ok) return usr;
+
+  let profRes, profs;
+  try {
+    profRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(usr.uid) + '&select=org_id,role,name,active',
+      { headers: svcHeaders() }
+    );
+    profs = await profRes.json().catch(() => null);
+  } catch {
+    return { ok: false, status: 502, error: 'No se pudo leer el perfil' };
+  }
+  const prof = Array.isArray(profs) ? profs[0] : null;
+  if (!prof || prof.active === false) {
+    return { ok: false, status: 403, error: 'Tu usuario no está activo en el equipo' };
+  }
+  return { ok: true, uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name };
+}
+
 // ---------- Helpers OAuth GHL ----------
 // Redirect 302 simple (navegaciones del browser, no fetch).
 function redirect(res, url) {
@@ -246,6 +309,175 @@ async function refreshGhlToken(integration) {
   }
 
   return tok.access_token;
+}
+
+// ---------- Credenciales GHL por org (módulo Ventas-GHL) ----------
+// Resolución multi-tenant: (1) integración OAuth de la org en st_integrations
+// (token refrescado — el Error de refresh burbujea al caller, que responde 502);
+// (2) fallback GHL_PIT + GHL_LOCATION por env (instancia dedicada); (3) null.
+async function getGhlCreds(orgId) {
+  const integration = await getIntegration(orgId);
+  if (integration) {
+    return { token: await refreshGhlToken(integration), locationId: integration.location_id };
+  }
+  if (GHL_PIT && GHL_LOCATION) {
+    return { token: GHL_PIT, locationId: GHL_LOCATION };
+  }
+  return null;
+}
+
+// ---------- GET /api/ghl/leads ----------
+// Leads con cita en el calendario de admisión (últimos 14 días + próximos 7)
+// para asociar la venta. Cache en memoria POR ORG (60s) — una cache global
+// filtraría leads entre tenants.
+const leadsCache = new Map(); // orgId -> { at, data }
+async function ghlLeads(req, res, member) {
+  let creds;
+  try {
+    creds = await getGhlCreds(member.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+  }
+  if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
+  if (!GHL_CALENDAR) return sendJSON(res, 501, { error: 'Falta configurar el calendario de admisión (GHL_CALENDAR)' });
+
+  const now = Date.now();
+  const cached = leadsCache.get(member.org_id);
+  if (cached && cached.data && now - cached.at < 60000) {
+    return sendJSON(res, 200, { leads: cached.data, cached: true });
+  }
+
+  let events = [];
+  try {
+    const start = now - 14 * 86400000, end = now + 7 * 86400000;
+    const evRes = await fetch(
+      `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(GHL_CALENDAR)}&startTime=${start}&endTime=${end}`,
+      { headers: ghlHeaders(creds.token, '2021-04-15') }
+    );
+    const ev = await evRes.json().catch(() => ({}));
+    events = ev.events || [];
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer las citas de GHL' });
+  }
+
+  // Dedupe por contacto, quedarse con la cita más reciente. Se saltean canceladas/inválidas.
+  const byContact = new Map();
+  for (const e of events) {
+    if (!e.contactId) continue;
+    const st = String(e.appointmentStatus || '').toLowerCase();
+    if (['cancelled', 'invalid'].includes(st)) continue;
+    const prev = byContact.get(e.contactId);
+    if (!prev || String(e.startTime) > String(prev.startTime)) byContact.set(e.contactId, e);
+  }
+
+  const leads = [];
+  for (const [cid, e] of byContact) {
+    try {
+      const cRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(cid)}`, { headers: ghlHeaders(creds.token) });
+      const c = (await cRes.json().catch(() => ({}))).contact || {};
+      leads.push({
+        id: cid,
+        name: (() => { const w = [c.firstName, c.lastName].filter(Boolean).join(' ').split(/\s+/); return w.filter((x, i) => i === 0 || x.toLowerCase() !== w[i - 1].toLowerCase()).join(' ') || c.email || 'Sin nombre'; })(),
+        email: c.email || '', phone: c.phone || '',
+        cita: e.startTime || '', estado: e.appointmentStatus || '',
+      });
+    } catch { /* contacto ilegible: lo salteamos */ }
+  }
+  leads.sort((a, b) => String(b.cita).localeCompare(String(a.cita)));
+  leadsCache.set(member.org_id, { at: now, data: leads });
+  return sendJSON(res, 200, { leads });
+}
+
+// ---------- POST /api/sales/ghl ----------
+// Cierra el ciclo de la venta en GHL: custom fields de onboarding + tag disparador
+// + oportunidad en el pipeline + aviso a Slack. Todo best-effort por paso.
+// Los IDs de custom fields (GHL_CF) y del pipeline (GHL_PIPELINE) vienen por env;
+// si faltan, el paso se saltea sin fallar.
+async function salesGhl(req, res, member) {
+  let creds;
+  try {
+    creds = await getGhlCreds(member.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+  }
+  if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
+
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
+  const b = parsed.data || {};
+  const contactId = typeof b.contactId === 'string' ? b.contactId.trim() : '';
+  if (!contactId) return sendJSON(res, 400, { error: 'Falta el contacto de GHL' });
+
+  const fueReserva = !!b.fueReserva;
+  const result = { customFields: false, tag: false, opportunity: false, slack: false };
+
+  // a. Custom fields de onboarding en el contacto (se saltea si GHL_CF no está configurado).
+  if (GHL_CF) {
+    const cf = [];
+    const push = (id, v) => { if (id && v !== undefined && v !== null && String(v).trim() !== '') cf.push({ id, value: String(v) }); };
+    push(GHL_CF.montoTotal, b.facturado);
+    push(GHL_CF.cantidadPagos, b.cuotas);
+    push(GHL_CF.metodoPago, b.metodo);
+    push(GHL_CF.programa, b.programa);
+    push(GHL_CF.primerPago, b.primerPago);
+    push(GHL_CF.vendedor, b.vendedor || member.name);
+    push(GHL_CF.fueReserva, fueReserva ? 'Si' : 'No');
+    if (fueReserva) push(GHL_CF.montoReserva, b.reserva);
+    try {
+      const upRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+        method: 'PUT', headers: ghlHeaders(creds.token), body: JSON.stringify({ customFields: cf }),
+      });
+      result.customFields = upRes.status >= 200 && upRes.status < 300;
+    } catch { /* best-effort, se reporta en result */ }
+  }
+
+  // b. Tag disparador del onboarding (venta-cerrada) o del seguimiento de seña (reserva).
+  const tag = fueReserva ? 'reserva' : 'venta-cerrada';
+  try {
+    const tagRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/tags`, {
+      method: 'POST', headers: ghlHeaders(creds.token), body: JSON.stringify({ tags: [tag] }),
+    });
+    result.tag = tagRes.status >= 200 && tagRes.status < 300;
+  } catch { /* idem */ }
+
+  // c. Oportunidad en el pipeline de onboarding (se saltea si GHL_PIPELINE no está configurado).
+  if (GHL_PIPELINE && GHL_PIPELINE.pipelineId) {
+    try {
+      const oppRes = await fetch(`${GHL_BASE}/opportunities/`, {
+        method: 'POST', headers: ghlHeaders(creds.token),
+        body: JSON.stringify({
+          locationId: creds.locationId,
+          pipelineId: GHL_PIPELINE.pipelineId,
+          pipelineStageId: fueReserva ? GHL_PIPELINE.stageReserva : GHL_PIPELINE.stagePago,
+          contactId,
+          name: `${b.clienteNombre || 'Cliente'} — ${b.programa || 'Programa'}`,
+          status: 'open',
+          monetaryValue: +b.facturado || 0,
+        }),
+      });
+      result.opportunity = oppRes.status >= 200 && oppRes.status < 300;
+    } catch { /* best-effort */ }
+  }
+
+  // d. Aviso a Slack (best-effort; deep-link white-label: app.mazefunnels.com, NUNCA app.gohighlevel.com).
+  if (SLACK_TOKEN && SLACK_WINS_CHANNEL) {
+    try {
+      const emoji = fueReserva ? ':lock:' : ':tada:';
+      const tipo = fueReserva ? 'Reserva (seña)' : 'Venta cerrada';
+      const monto = fueReserva ? (b.reserva || 0) : (b.cash || 0);
+      const txt = `${emoji} *${tipo}:* ${b.clienteNombre || 'Cliente'} — *$${monto}* cash · ${b.programa || 's/programa'} · closer: ${b.vendedor || member.name}\n<https://app.mazefunnels.com/v2/location/${creds.locationId}/contacts/detail/${contactId}|Abrir contacto en GHL>`;
+      const sRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + SLACK_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: SLACK_WINS_CHANNEL, text: txt, unfurl_links: false }),
+      });
+      const sJson = await sRes.json().catch(() => ({}));
+      result.slack = !!sJson.ok;
+    } catch { /* idem */ }
+  }
+
+  console.log(`[api] POST /api/sales/ghl member=${member.uid} contact=${contactId} tag=${tag} cf=${result.customFields} slack=${result.slack}`);
+  return sendJSON(res, 200, { ok: true, tag, ...result });
 }
 
 // ---------- POST /api/members ----------
@@ -1067,6 +1299,19 @@ const server = http.createServer(async (req, res) => {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
       return importGhlUser(req, res, admin);
+    }
+
+    // Rutas del módulo Ventas-GHL: cualquier miembro ACTIVO del equipo (no solo admin).
+    if (req.method === 'GET' && path === '/api/ghl/leads') {
+      const member = await requireMember(req);
+      if (!member.ok) return sendJSON(res, member.status, { error: member.error });
+      return ghlLeads(req, res, member);
+    }
+
+    if (req.method === 'POST' && path === '/api/sales/ghl') {
+      const member = await requireMember(req);
+      if (!member.ok) return sendJSON(res, member.status, { error: member.error });
+      return salesGhl(req, res, member);
     }
 
     if (req.method === 'POST' && path === '/api/me/password') {
