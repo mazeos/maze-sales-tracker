@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-05 - Completed quick task 260705-1ln: eliminar org + entrar como
+Last activity: 2026-07-05 - Feature Caja/cuotas por cobrar completa (spec+plan+DB+UI+QA), desplegada en Clara, PR #10 a main
 
 Progress: [░░░░░░░░░░] 0%
 
