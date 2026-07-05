@@ -177,32 +177,42 @@ async function checkUserToken(bearerToken) {
   return { ok: true, uid };
 }
 
+// Multi-cuenta: resuelve el PERFIL ACTIVO de un login (st_user_state validado,
+// o el único/primer perfil activo por user_id). Devuelve la fila del perfil o null.
+async function resolveActiveProfile(authUid) {
+  let stateRows = [];
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_user_state?user_id=eq.' + encodeURIComponent(authUid) + '&select=active_profile_id', { headers: svcHeaders() });
+    stateRows = r.status === 200 ? await r.json().catch(() => []) : [];
+  } catch { /* fallback abajo */ }
+  const pr = await fetch(
+    SUPABASE_URL + '/rest/v1/st_profiles?user_id=eq.' + encodeURIComponent(authUid)
+      + '&select=id,org_id,role,name,active,ghl_user_id&order=created_at.asc',
+    { headers: svcHeaders() }
+  );
+  if (pr.status !== 200) throw new Error('perfiles ilegibles');
+  const profs = (await pr.json().catch(() => [])).filter((p) => p.active !== false);
+  if (!profs.length) return null;
+  const wanted = stateRows[0] && stateRows[0].active_profile_id;
+  return profs.find((p) => p.id === wanted) || profs[0];
+}
+
 async function checkAdminToken(bearerToken) {
   // 1. Validar el JWT (mismo paso que cualquier usuario logueado).
   const usr = await checkUserToken(bearerToken);
   if (!usr.ok) return usr;
-  const uid = usr.uid;
 
-  // 2. Leer el perfil real del caller con la service key y exigir role=admin.
-  let profRes;
-  try {
-    profRes = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid) + '&select=org_id,role',
-      { headers: svcHeaders() }
-    );
-  } catch {
+  // 2. Perfil ACTIVO del caller (multi-cuenta) y exigir role=admin.
+  let prof;
+  try { prof = await resolveActiveProfile(usr.uid); } catch {
     return { ok: false, status: 502, error: 'No se pudo leer el perfil del usuario' };
   }
-  if (profRes.status !== 200) {
-    return { ok: false, status: 403, error: 'Solo el admin puede gestionar miembros' };
-  }
-  const profs = await profRes.json();
-  const prof = Array.isArray(profs) ? profs[0] : null;
   if (!prof || prof.role !== 'admin') {
     return { ok: false, status: 403, error: 'Solo el admin puede gestionar miembros' };
   }
 
-  return { ok: true, uid, org_id: prof.org_id };
+  // uid = id del PERFIL (semántica histórica: en cuentas pre-multicuenta coincide con el login)
+  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id };
 }
 
 function requireAdmin(req) {
@@ -216,21 +226,15 @@ async function requireMember(req) {
   const usr = await checkUserToken(req.headers['authorization'] || '');
   if (!usr.ok) return usr;
 
-  let profRes, profs;
-  try {
-    profRes = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(usr.uid) + '&select=org_id,role,name,active',
-      { headers: svcHeaders() }
-    );
-    profs = await profRes.json().catch(() => null);
-  } catch {
+  let prof;
+  try { prof = await resolveActiveProfile(usr.uid); } catch {
     return { ok: false, status: 502, error: 'No se pudo leer el perfil' };
   }
-  const prof = Array.isArray(profs) ? profs[0] : null;
-  if (!prof || prof.active === false) {
+  if (!prof) {
     return { ok: false, status: 403, error: 'Tu usuario no está activo en el equipo' };
   }
-  return { ok: true, uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name };
+  // uid = id del PERFIL activo (los consumidores lo usan como member_id)
+  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name };
 }
 
 // ---------- Auth: super-admin de la plataforma (equipo Maze) ----------
@@ -1004,7 +1008,7 @@ async function createMember(req, res, admin) {
     profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
       method: 'POST',
       headers: svcHeaders({ 'Prefer': 'return=representation' }),
-      body: JSON.stringify({ id: newUid, org_id: admin.org_id, name, role, commission: 0 }),
+      body: JSON.stringify({ id: newUid, user_id: newUid, org_id: admin.org_id, name, role, commission: 0 }),
     });
     profRows = await profRes.json().catch(() => null);
   } catch {
@@ -1618,11 +1622,12 @@ async function importGhlUser(req, res, admin) {
     }
     const uid = existingAuth.id;
 
-    // Perfil del uid en el tracker (de cualquier org).
+    // Multi-cuenta: buscar el perfil del login EN ESTA org (puede tener otros en otras orgs).
     let dupProf;
     try {
       const r = await fetch(
-        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid)
+        SUPABASE_URL + '/rest/v1/st_profiles?user_id=eq.' + encodeURIComponent(uid)
+          + '&org_id=eq.' + encodeURIComponent(admin.org_id)
           + '&select=id,org_id,name,active,ghl_user_id',
         { headers: svcHeaders() }
       );
@@ -1633,10 +1638,20 @@ async function importGhlUser(req, res, admin) {
       return sendJSON(res, 502, { error: 'No se pudieron leer los perfiles del equipo' });
     }
 
-    // Perfil en OTRA org del tracker → sí es un conflicto real.
-    if (dupProf && dupProf.org_id !== admin.org_id) {
-      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_otra_org -> 409`);
-      return sendJSON(res, 409, { error: 'Ese email ya pertenece a otro equipo del tracker' });
+    // Sin perfil en ESTA org → crear la MEMBRESÍA (la cuenta puede vivir en otros equipos).
+    if (!dupProf) {
+      try {
+        const insRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
+          method: 'POST',
+          headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+          body: JSON.stringify({ user_id: uid, org_id: admin.org_id, name, role, commission: 0, ghl_user_id: ghlUserId }),
+        });
+        if (insRes.status >= 300) return sendJSON(res, 502, { error: 'No se pudo crear la membresía' });
+      } catch {
+        return sendJSON(res, 502, { error: 'No se pudo crear la membresía' });
+      }
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} membresia_nueva uid=${uid} -> 200`);
+      return sendJSON(res, 200, { ok: true, existing_account: true });
     }
 
     // Perfil en ESTA org → vincular (y reactivar + unban si estaba inactivo).
@@ -1646,7 +1661,7 @@ async function importGhlUser(req, res, admin) {
       if (dupProf.active === false) patch.active = true;
       try {
         const patchRes = await fetch(
-          SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid),
+          SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(dupProf.id),
           { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify(patch) }
         );
         if (patchRes.status < 200 || patchRes.status >= 300) {
@@ -1679,7 +1694,7 @@ async function importGhlUser(req, res, admin) {
       adoptRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
         method: 'POST',
         headers: svcHeaders({ 'Prefer': 'return=representation' }),
-        body: JSON.stringify({ id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+        body: JSON.stringify({ id: uid, user_id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
       });
       adoptRows = await adoptRes.json().catch(() => null);
     } catch {
@@ -1708,7 +1723,7 @@ async function importGhlUser(req, res, admin) {
     profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
       method: 'POST',
       headers: svcHeaders({ 'Prefer': 'return=representation' }),
-      body: JSON.stringify({ id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+      body: JSON.stringify({ id: newUid, user_id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
     });
     profRows = await profRes.json().catch(() => null);
   } catch {
