@@ -2549,9 +2549,38 @@ window.pickTeam=async(profileId)=>{
 window.openTeamPicker=async()=>{ const {data:{session}}=await sb.auth.getSession(); if(session) showTeamPicker(session.user.id); };
 
 // ---------- init ----------
+// Modo embebido: el tracker corre dentro de una Custom Page de GHL (?embed).
+const EMBED = new URLSearchParams(location.search).has('embed');
+// Handshake SSO con GHL: pide los datos del usuario al iframe padre, los canjea
+// por un magic link en la mini-API y abre sesión sin contraseña. Devuelve true
+// si logró loguear (el caller reintenta boot); false si no hay respuesta a tiempo.
+function ssoFromGhl(){
+  return new Promise((resolve)=>{
+    let done=false;
+    const finish=(ok)=>{ if(done) return; done=true; window.removeEventListener('message',onMsg); clearTimeout(t); resolve(ok); };
+    const onMsg=async(e)=>{
+      const d=e.data||{};
+      if(d.message!=='REQUEST_USER_DATA_RESPONSE' || !d.payload) return;
+      try{
+        const r=await fetch('/api/sso/ghl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:d.payload})});
+        const j=await r.json().catch(()=>null);
+        if(!r.ok || !j || !j.token_hash){ finish(false); return; }
+        const {error}=await sb.auth.verifyOtp({type:'magiclink',token_hash:j.token_hash});
+        finish(!error);
+      }catch(err){ finish(false); }
+    };
+    window.addEventListener('message',onMsg);
+    window.parent.postMessage({message:'REQUEST_USER_DATA'},'*');
+    var t=setTimeout(()=>finish(false),6000);
+  });
+}
 async function boot(){
   const {data:{session}}=await sb.auth.getSession();
-  if(!session){ renderLogin(); return; }
+  if(!session){
+    // En GHL: intentar SSO antes de mostrar el login manual.
+    if(EMBED){ const ok=await ssoFromGhl(); if(ok){ boot(); return; } }
+    renderLogin(); return;
+  }
   // Multi-cuenta: un login puede tener perfiles en varias orgs.
   const {data:allProfs}=await sb.from('st_profiles').select('*').eq('user_id',session.user.id);
   MY_PROFILES=(allProfs||[]).filter(p=>p.active!==false);
