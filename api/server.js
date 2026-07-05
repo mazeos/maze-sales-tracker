@@ -13,7 +13,9 @@
 //   DELETE /api/integrations/ghl   -> desconecta la integración GHL de la org
 //   GET    /api/ghl/users          -> lista los usuarios de la subcuenta GHL con su estado + reconcilia bajas
 //   POST   /api/ghl/users/import   -> importa/vincula/reactiva un usuario GHL como miembro del tracker
-//   GET    /api/ghl/leads          -> leads con cita en el calendario de admisión (cualquier miembro activo)
+//   GET    /api/ghl/calendars      -> calendarios GHL con closers sincronizados (para elegir el de llamadas)
+//   POST   /api/integrations/ghl/calendar -> guarda/desconfigura el calendario de llamadas de la org
+//   GET    /api/ghl/leads          -> leads con cita en el calendario de llamadas de la org (cualquier miembro activo)
 //   POST   /api/sales/ghl          -> cierra el ciclo de la venta en GHL: custom fields + tag + oportunidad + Slack
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 
@@ -315,21 +317,26 @@ async function refreshGhlToken(integration) {
 // Resolución multi-tenant: (1) integración OAuth de la org en st_integrations
 // (token refrescado — el Error de refresh burbujea al caller, que responde 502);
 // (2) fallback GHL_PIT + GHL_LOCATION por env (instancia dedicada); (3) null.
+// Devuelve también la fila de la integración (`integration`, null en modo PIT)
+// para que los callers lean config por org (ej. calendar_id) SIN una segunda
+// llamada a getIntegration. OJO: la fila incluye tokens — jamás pasarla al browser.
 async function getGhlCreds(orgId) {
   const integration = await getIntegration(orgId);
   if (integration) {
-    return { token: await refreshGhlToken(integration), locationId: integration.location_id };
+    return { token: await refreshGhlToken(integration), locationId: integration.location_id, integration };
   }
   if (GHL_PIT && GHL_LOCATION) {
-    return { token: GHL_PIT, locationId: GHL_LOCATION };
+    return { token: GHL_PIT, locationId: GHL_LOCATION, integration: null };
   }
   return null;
 }
 
 // ---------- GET /api/ghl/leads ----------
-// Leads con cita en el calendario de admisión (últimos 14 días + próximos 7)
-// para asociar la venta. Cache en memoria POR ORG (60s) — una cache global
-// filtraría leads entre tenants.
+// Leads con cita en el calendario de llamadas (últimos 14 días + próximos 7)
+// para asociar la venta. El calendario se resuelve POR ORG: el elegido en
+// Configuraciones (st_integrations.calendar_id) manda; si la org no eligió,
+// fallback al env GHL_CALENDAR (modo PIT / instancia dedicada); sin ninguno → 501.
+// Cache en memoria POR ORG (60s) — una cache global filtraría leads entre tenants.
 const leadsCache = new Map(); // orgId -> { at, data }
 async function ghlLeads(req, res, member) {
   let creds;
@@ -339,7 +346,8 @@ async function ghlLeads(req, res, member) {
     return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
   }
   if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
-  if (!GHL_CALENDAR) return sendJSON(res, 501, { error: 'Falta configurar el calendario de admisión (GHL_CALENDAR)' });
+  const calendarId = (creds.integration && creds.integration.calendar_id) || GHL_CALENDAR;
+  if (!calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
 
   const now = Date.now();
   const cached = leadsCache.get(member.org_id);
@@ -351,7 +359,7 @@ async function ghlLeads(req, res, member) {
   try {
     const start = now - 14 * 86400000, end = now + 7 * 86400000;
     const evRes = await fetch(
-      `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(GHL_CALENDAR)}&startTime=${start}&endTime=${end}`,
+      `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${start}&endTime=${end}`,
       { headers: ghlHeaders(creds.token, '2021-04-15') }
     );
     const ev = await evRes.json().catch(() => ({}));
@@ -386,6 +394,162 @@ async function ghlLeads(req, res, member) {
   leads.sort((a, b) => String(b.cita).localeCompare(String(a.cita)));
   leadsCache.set(member.org_id, { at: now, data: leads });
   return sendJSON(res, 200, { leads });
+}
+
+// ---------- Calendarios GHL relevantes para la org (Fase 2.3) ----------
+// Lista los calendarios de la subcuenta GHL filtrados a los que atiende algún
+// closer YA sincronizado en el tracker (decisión de producto: no listar todos
+// los calendarios de la location, solo los relevantes al equipo de cierre).
+// Recibe las creds ya resueltas (token vigente) y el org_id. Lanza Error en
+// fallas de red/status (el caller responde 502/500 genérico).
+async function listOrgCalendars(creds, orgId) {
+  // a. Closers sincronizados de la org: activos (active null cuenta como activo,
+  //    patrón existente) y con ghl_user_id. Map ghl_user_id -> nombre.
+  const profRes = await fetch(
+    SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
+      + '&role=eq.closer&select=name,active,ghl_user_id',
+    { headers: svcHeaders() }
+  );
+  if (profRes.status !== 200) throw new Error('No se pudieron leer los closers de la org');
+  const profs = await profRes.json().catch(() => null);
+  if (!Array.isArray(profs)) throw new Error('Respuesta inválida al leer los closers');
+  const closerByGhlId = new Map();
+  for (const p of profs) {
+    if (p.active !== false && p.ghl_user_id) closerByGhlId.set(p.ghl_user_id, p.name);
+  }
+
+  // b. Sin closers sincronizados no hay nada que listar: cortar acá SIN llamar
+  //    a GHL (no gastar rate limit al pedo).
+  if (closerByGhlId.size === 0) return { calendars: [], sinClosers: true };
+
+  // c. Calendarios de la subcuenta (misma versión de API que los events).
+  const calRes = await fetch(
+    GHL_BASE + '/calendars/?locationId=' + encodeURIComponent(creds.locationId),
+    { headers: ghlHeaders(creds.token, '2021-04-15') }
+  );
+  if (calRes.status < 200 || calRes.status >= 300) {
+    console.error(`[api] listOrgCalendars org=${orgId} ghl_fail status=${calRes.status}`);
+    throw new Error('No se pudo hablar con HighLevel');
+  }
+  const body = await calRes.json().catch(() => ({}));
+  const all = Array.isArray(body && body.calendars) ? body.calendars : [];
+
+  // d. Solo calendarios con algún closer sincronizado en teamMembers.
+  //    Respuesta mínima: id/name/closers — jamás teamMembers crudos ni tokens.
+  const calendars = [];
+  for (const c of all) {
+    if (!c || !c.id || !Array.isArray(c.teamMembers)) continue;
+    const closers = [];
+    for (const tm of c.teamMembers) {
+      const nombre = tm && closerByGhlId.get(tm.userId);
+      if (nombre && !closers.includes(nombre)) closers.push(nombre);
+    }
+    if (!closers.length) continue;
+    calendars.push({ id: c.id, name: c.name || 'Sin nombre', closers });
+  }
+  return { calendars, sinClosers: false };
+}
+
+// ---------- GET /api/ghl/calendars ----------
+// Calendarios elegibles para "Calendario de llamadas" + el actualmente elegido.
+// Solo admin. Nunca expone tokens ni datos de otras orgs.
+async function listGhlCalendars(req, res, admin) {
+  let creds;
+  try {
+    creds = await getGhlCreds(admin.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+  }
+  if (!creds) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+
+  let listado;
+  try {
+    listado = await listOrgCalendars(creds, admin.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  const out = {
+    calendars: listado.calendars,
+    selected: (creds.integration && creds.integration.calendar_id) || null,
+    selected_name: (creds.integration && creds.integration.calendar_name) || null,
+  };
+  if (listado.sinClosers) out.hint = 'Importá primero a tus closers desde Equipo desde HighLevel';
+  console.log(`[api] GET /api/ghl/calendars admin=${admin.uid} org=${admin.org_id} n=${listado.calendars.length} -> 200`);
+  return sendJSON(res, 200, out);
+}
+
+// ---------- POST /api/integrations/ghl/calendar ----------
+// Guarda (o desconfigura) el calendario de llamadas de la org. NUNCA confía en
+// el body: el calendar_id se re-valida contra la lista filtrada server-side
+// (closers de la org) y el calendar_name sale de la respuesta de GHL.
+async function setGhlCalendar(req, res, admin) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
+  const raw = parsed.data && parsed.data.calendar_id;
+  const calendarId = typeof raw === 'string' ? raw.trim() : '';
+
+  // Desconfigurar: calendar_id vacío → limpiar y volver al fallback env.
+  // Idempotente: ok aunque la org no tuviera fila en st_integrations.
+  if (calendarId === '') {
+    try {
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id),
+        {
+          method: 'PATCH',
+          headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+          body: JSON.stringify({ calendar_id: null, calendar_name: null, updated_at: new Date().toISOString() }),
+        }
+      );
+      if (patchRes.status < 200 || patchRes.status >= 300) {
+        return sendJSON(res, 500, { error: 'No se pudo guardar el calendario' });
+      }
+    } catch {
+      return sendJSON(res, 500, { error: 'No se pudo guardar el calendario' });
+    }
+    leadsCache.delete(admin.org_id); // los leads cacheados eran del calendario anterior
+    console.log(`[api] POST /api/integrations/ghl/calendar admin=${admin.uid} org=${admin.org_id} cleared -> 200`);
+    return sendJSON(res, 200, { ok: true });
+  }
+
+  // Configurar: exige integración OAuth propia (el modo PIT no tiene fila donde
+  // persistir; el calendario de una instancia dedicada se maneja por env).
+  let creds;
+  try {
+    creds = await getGhlCreds(admin.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+  }
+  if (!creds) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+  if (!creds.integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+
+  let listado;
+  try {
+    listado = await listOrgCalendars(creds, admin.org_id);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+  const cal = listado.calendars.find((c) => c.id === calendarId);
+  if (!cal) return sendJSON(res, 400, { error: 'Ese calendario no está disponible' });
+
+  try {
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id),
+      {
+        method: 'PATCH',
+        headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ calendar_id: cal.id, calendar_name: cal.name, updated_at: new Date().toISOString() }),
+      }
+    );
+    if (patchRes.status < 200 || patchRes.status >= 300) {
+      return sendJSON(res, 500, { error: 'No se pudo guardar el calendario' });
+    }
+  } catch {
+    return sendJSON(res, 500, { error: 'No se pudo guardar el calendario' });
+  }
+  leadsCache.delete(admin.org_id); // los leads cacheados eran del calendario anterior
+  console.log(`[api] POST /api/integrations/ghl/calendar admin=${admin.uid} org=${admin.org_id} saved -> 200`);
+  return sendJSON(res, 200, { ok: true, calendar_name: cal.name });
 }
 
 // ---------- POST /api/sales/ghl ----------
@@ -1299,6 +1463,18 @@ const server = http.createServer(async (req, res) => {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
       return importGhlUser(req, res, admin);
+    }
+
+    if (req.method === 'GET' && path === '/api/ghl/calendars') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return listGhlCalendars(req, res, admin);
+    }
+
+    if (req.method === 'POST' && path === '/api/integrations/ghl/calendar') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return setGhlCalendar(req, res, admin);
     }
 
     // Rutas del módulo Ventas-GHL: cualquier miembro ACTIVO del equipo (no solo admin).
