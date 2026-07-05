@@ -20,6 +20,9 @@
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 //   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
 //   POST   /api/orgs               -> alta de una org + su admin (SOLO super-admins de Maze)
+//   GET    /api/platform/settings  -> estado del token de agencia GHL (solo hint, SOLO super-admins)
+//   POST   /api/platform/settings  -> guarda/borra el token de agencia GHL, validado en vivo (SOLO super-admins)
+//   GET    /api/platform/locations -> busca subcuentas de la agencia GHL por nombre/email/id (SOLO super-admins)
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -315,6 +318,55 @@ async function getIntegration(orgId) {
     return Array.isArray(rows) ? (rows[0] || null) : null;
   } catch {
     return null;
+  }
+}
+
+// ---------- Settings de plataforma (st_platform_settings, deny-all) ----------
+// Key/value global de la plataforma. Solo la service role lee/escribe esta
+// tabla (RLS sin policies). El valor del PIT jamás sale de la API ni va a logs.
+const PIT_KEY = 'ghl_agency_pit'; // el NOMBRE de la key, no el valor — no es un secreto
+
+// Lee un setting. Devuelve el value o null (también null en error de red —
+// mismo patrón que getIntegration: el caller decide cómo responder).
+async function getPlatformSetting(key) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_platform_settings?key=eq.' + encodeURIComponent(key) + '&select=value',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return null;
+    const rows = await r.json().catch(() => null);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return (row && typeof row.value === 'string') ? row.value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Guarda (upsert) un setting. Devuelve true/false según éxito.
+async function setPlatformSetting(key, value) {
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_platform_settings?on_conflict=key', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }),
+    });
+    return r.status >= 200 && r.status < 300;
+  } catch {
+    return false;
+  }
+}
+
+// Borra un setting. Idempotente: true aunque la key no existiera.
+async function deletePlatformSetting(key) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_platform_settings?key=eq.' + encodeURIComponent(key),
+      { method: 'DELETE', headers: svcHeaders({ 'Prefer': 'return=minimal' }) }
+    );
+    return r.status >= 200 && r.status < 300;
+  } catch {
+    return false;
   }
 }
 
@@ -1717,6 +1769,138 @@ async function createOrg(req, res, sa) {
   return sendJSON(res, 200, out);
 }
 
+// ---------- GET /api/platform/settings ----------
+// Estado del token de agencia GHL para la vista Plataforma. SOLO super-admins.
+// El token completo JAMÁS sale en la respuesta ni en logs: solo un hint
+// '····' + últimos 4 caracteres.
+async function getPlatformSettings(req, res, sa) {
+  const pit = await getPlatformSetting(PIT_KEY);
+  console.log(`[api] GET /api/platform/settings super=${sa.email} set=${!!pit} -> 200`);
+  return sendJSON(res, 200, {
+    agency_pit_set: !!pit,
+    agency_pit_hint: pit ? '····' + pit.slice(-4) : null,
+  });
+}
+
+// ---------- POST /api/platform/settings ----------
+// Guarda/reemplaza/borra el token de agencia GHL. SOLO super-admins.
+// Antes de guardar se valida EN VIVO contra locations/search: un token que no
+// puede listar subcuentas no sirve para nada acá. Body {agency_pit} vacío o
+// null = borrar el token. JAMÁS loggear el valor: solo set/cleared + email.
+async function setPlatformSettings(req, res, sa) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const raw = parsed.data && parsed.data.agency_pit;
+  const pit = typeof raw === 'string' ? raw.trim() : '';
+
+  // Vacío = borrar el token (queda "no configurada").
+  if (!pit) {
+    const ok = await deletePlatformSetting(PIT_KEY);
+    if (!ok) return sendJSON(res, 500, { error: 'No se pudo borrar el token de agencia' });
+    console.log(`[api] POST /api/platform/settings super=${sa.email} cleared -> 200`);
+    return sendJSON(res, 200, { ok: true, agency_pit_set: false, agency_pit_hint: null });
+  }
+
+  // Validación en vivo: el token tiene que poder listar subcuentas.
+  try {
+    const testRes = await fetch(GHL_BASE + '/locations/search?limit=1', { headers: ghlHeaders(pit) });
+    if (testRes.status < 200 || testRes.status >= 300) {
+      console.log(`[api] POST /api/platform/settings super=${sa.email} invalid_pit status=${testRes.status} -> 400`);
+      return sendJSON(res, 400, { error: 'Token de agencia inválido o sin permisos de locations' });
+    }
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  const ok = await setPlatformSetting(PIT_KEY, pit);
+  if (!ok) return sendJSON(res, 500, { error: 'No se pudo guardar el token de agencia' });
+  console.log(`[api] POST /api/platform/settings super=${sa.email} set -> 200`);
+  return sendJSON(res, 200, { ok: true, agency_pit_set: true, agency_pit_hint: '····' + pit.slice(-4) });
+}
+
+// ---------- Subcuentas de la agencia (agency PIT) ----------
+// Pagina GET /locations/search hasta 3 páginas de 100 (300 locations máx —
+// tope anti-DoS aceptado: agencia de un solo super-admin). Corta antes si una
+// página vuelve incompleta. Si una página responde no-2xx, lanza Error (el
+// caller responde 502). Filtro `q` (lowercase/trim) contra name/email/id;
+// q vacío = todas. Devuelve [{id,name,city,country}] — jamás el objeto crudo
+// de GHL (email queda server-side, se usa solo para filtrar).
+async function searchAgencyLocations(pit, q) {
+  const acc = [];
+  for (let page = 0; page < 3; page++) {
+    const r = await fetch(GHL_BASE + '/locations/search?limit=100&skip=' + (page * 100), {
+      headers: ghlHeaders(pit),
+    });
+    if (r.status < 200 || r.status >= 300) {
+      console.error(`[api] searchAgencyLocations fail status=${r.status} page=${page}`);
+      throw new Error('No se pudo hablar con HighLevel');
+    }
+    const body = await r.json().catch(() => ({}));
+    const locs = Array.isArray(body && body.locations) ? body.locations : [];
+    acc.push(...locs);
+    if (locs.length < 100) break; // página incompleta: no hay más
+  }
+
+  const query = String(q || '').toLowerCase().trim();
+  const filtered = query
+    ? acc.filter((l) => l && (
+        String(l.name || '').toLowerCase().includes(query)
+        || String(l.email || '').toLowerCase().includes(query)
+        || String(l.id || '').toLowerCase().includes(query)
+      ))
+    : acc.filter((l) => l && l.id);
+
+  return filtered.map((l) => ({
+    id: l.id,
+    name: l.name || l.id,
+    city: l.city || '',
+    country: l.country || '',
+  }));
+}
+
+// ---------- GET /api/platform/locations?q= ----------
+// Buscador de subcuentas de la agencia para el alta de orgs. SOLO super-admins.
+// Anota `linked_org`: si la location ya está vinculada a una org del tracker,
+// el nombre de esa org (para deshabilitarla en la UI). Máximo 20 resultados.
+async function listAgencyLocations(req, res, sa, url) {
+  const pit = await getPlatformSetting(PIT_KEY);
+  if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
+
+  let locations;
+  try {
+    locations = await searchAgencyLocations(pit, url.searchParams.get('q') || '');
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  // Vínculos existentes: location_id -> nombre de la org (o el org_id de fallback).
+  const linkedByLocation = new Map();
+  try {
+    const intsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?select=org_id,location_id',
+      { headers: svcHeaders() }
+    );
+    const ints = intsRes.status === 200 ? await intsRes.json().catch(() => null) : null;
+    const orgsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?select=id,name',
+      { headers: svcHeaders() }
+    );
+    const orgs = orgsRes.status === 200 ? await orgsRes.json().catch(() => null) : null;
+    const orgName = new Map();
+    for (const o of (Array.isArray(orgs) ? orgs : [])) orgName.set(o.id, o.name);
+    for (const i of (Array.isArray(ints) ? ints : [])) {
+      if (i && i.location_id) linkedByLocation.set(i.location_id, orgName.get(i.org_id) || i.org_id);
+    }
+  } catch { /* best-effort: sin la anotación el buscador sigue sirviendo */ }
+
+  const out = locations.slice(0, 20).map((l) => ({
+    ...l,
+    linked_org: linkedByLocation.get(l.id) || null,
+  }));
+  console.log(`[api] GET /api/platform/locations super=${sa.email} n=${out.length} -> 200`);
+  return sendJSON(res, 200, { locations: out });
+}
+
 // ---------- Router ----------
 const server = http.createServer(async (req, res) => {
   try {
@@ -1791,6 +1975,19 @@ const server = http.createServer(async (req, res) => {
       const sa = await requireSuperAdmin(req);
       if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
       return req.method === 'GET' ? listOrgs(req, res, sa) : createOrg(req, res, sa);
+    }
+
+    // Vista Plataforma: SOLO super-admins (mismo guard fail-closed que /api/orgs).
+    if (path === '/api/platform/settings' && (req.method === 'GET' || req.method === 'POST')) {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return req.method === 'GET' ? getPlatformSettings(req, res, sa) : setPlatformSettings(req, res, sa);
+    }
+
+    if (req.method === 'GET' && path === '/api/platform/locations') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return listAgencyLocations(req, res, sa, url);
     }
 
     // Todo lo demás bajo /api/members exige admin.
