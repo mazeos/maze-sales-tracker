@@ -618,6 +618,7 @@ function topbar(extra){
     <div class="agency">
       <div><h1>${esc(DB.team.name)}</h1><div class="sub">Equipo · ${teamModeLabel()}</div></div>
       <span class="badge"><span class="dot"></span>Carga manual · en vivo</span>
+      ${MY_PROFILES&&MY_PROFILES.length>1?`<button class="chip" onclick="openTeamPicker()" data-tip="Tu cuenta está en varios equipos — cambiá acá.">⇄ Equipo</button>`:''}
     </div>
     <div class="controls">${extra||''}</div>
   </div>`;
@@ -2525,12 +2526,43 @@ applyTheme((function(){ try{ return localStorage.getItem('maze_theme')||'dark'; 
   document.addEventListener('scroll',()=>{ if(cur){ box.style.display='none'; cur=null; } }, true);
 })();
 
+// ---------- multi-cuenta: selector de equipo ----------
+let MY_PROFILES=null;
+async function showTeamPicker(userId){
+  const {data:orgs}=await sb.from('st_orgs').select('id,name');
+  const nameOfOrg=(id)=>{ const o=(orgs||[]).find(x=>x.id===id); return o?o.name:'Equipo'; };
+  let ov=document.getElementById('teamOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='teamOv'; ov.className='drill-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="drill" style="max-width:400px">
+    <div class="drill-head"><div><div class="eyebrow">Multi-cuenta</div><h3>¿A qué equipo entrás?</h3></div></div>
+    <p class="drill-def">Tu cuenta pertenece a varios equipos. Podés cambiar cuando quieras desde el botón ⇄ de arriba.</p>
+    ${MY_PROFILES.map(p=>`<button class="btn" style="display:block;width:100%;margin-bottom:8px;text-align:left" onclick="pickTeam('${p.id}')">${esc(nameOfOrg(p.org_id))} <span style="opacity:.7">· ${ROLE_LABEL[p.role]||p.role}</span></button>`).join('')}
+  </div>`;
+  ov.style.display='flex';
+}
+window.pickTeam=async(profileId)=>{
+  const {data:{session}}=await sb.auth.getSession(); if(!session) return;
+  const {error}=await sb.from('st_user_state').upsert({user_id:session.user.id,active_profile_id:profileId,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+  if(error){ toast('No se pudo cambiar de equipo'); return; }
+  location.reload();
+};
+window.openTeamPicker=async()=>{ const {data:{session}}=await sb.auth.getSession(); if(session) showTeamPicker(session.user.id); };
+
 // ---------- init ----------
 async function boot(){
   const {data:{session}}=await sb.auth.getSession();
   if(!session){ renderLogin(); return; }
-  const {data:prof}=await sb.from('st_profiles').select('*').eq('id',session.user.id).maybeSingle();
-  if(!prof){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
+  // Multi-cuenta: un login puede tener perfiles en varias orgs.
+  const {data:allProfs}=await sb.from('st_profiles').select('*').eq('user_id',session.user.id);
+  MY_PROFILES=(allProfs||[]).filter(p=>p.active!==false);
+  if(!MY_PROFILES.length){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
+  let prof=MY_PROFILES[0];
+  if(MY_PROFILES.length>1){
+    const {data:st}=await sb.from('st_user_state').select('active_profile_id').eq('user_id',session.user.id).maybeSingle();
+    const activo=st&&MY_PROFILES.find(p=>p.id===st.active_profile_id);
+    if(activo){ prof=activo; }
+    else { await showTeamPicker(session.user.id); return; } // elige y recarga
+  }
   ME={id:prof.id,role:prof.role,name:prof.name,org_id:prof.org_id}; IS_ADMIN=prof.role==='admin';
   // Detección super-admin (un único fetch tras el login): 200 en
   // /api/platform/settings = super-admin → se muestra el ítem Plataforma.
