@@ -2025,6 +2025,37 @@ async function loadShadow(){
   SHADOW=sm.data||[]; KPI_CFG=kc.data||[]; SHADOW_LOADING=false;
   if(state.view==='team') renderTeam();
 }
+// Recap del día: resumen legible por miembro de lo que midió el motor HOY,
+// con las diferencias contra lo cargado a mano marcadas.
+function recapHoy(){
+  const hoy=todayStr();
+  const rows=(SHADOW||[]).filter(r=>r.metric_date===hoy);
+  if(!rows.length) return `<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Hoy todavía no hay corrida — tocá el botón para generar el recap.</p>`;
+  const nameOf=(id)=>{ const m=DB.members.find(x=>x.id===id); return m?m.name:'—'; };
+  const byMember={};
+  rows.forEach(r=>{ (byMember[r.member_id]=byMember[r.member_id]||[]).push(r); });
+  let html='';
+  Object.keys(byMember).forEach(mid=>{
+    const rs=byMember[mid];
+    const conAlgo=rs.filter(r=>+r.auto_value>0 || (r.manual_value!=null && +r.manual_value!==+r.auto_value));
+    const diffs=rs.filter(r=>r.manual_value!=null && +r.manual_value!==+r.auto_value);
+    let detalle;
+    if(!conAlgo.length){ detalle=`<span style="color:var(--muted)">sin actividad medida hoy</span>`; }
+    else {
+      detalle=conAlgo.map(r=>{
+        const mismatch=r.manual_value!=null && +r.manual_value!==+r.auto_value;
+        return `<span class="chip" style="${mismatch?'border-color:#ff6b6b;color:#ff6b6b':''}">${esc(r.kpi)}: <b>${+r.auto_value}</b>${r.manual_value!=null?` / manual ${+r.manual_value}`:''}</span>`;
+      }).join(' ');
+    }
+    html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <b style="min-width:130px">${esc(nameOf(mid))}</b>${detalle}
+      ${diffs.length?`<span class="cuo-est venc">${diffs.length} diferencia${diffs.length>1?'s':''}</span>`:`<span class="cuo-est paga">sin diferencias</span>`}
+    </div>`;
+  });
+  const ultima=rows.map(r=>r.computed_at).sort().pop();
+  const hora=ultima?new Date(ultima).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'';
+  return `<div style="margin-bottom:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:8px">Recap de HOY (${hoy})${hora?` · última corrida ${hora}`:''}</div>${html}</div>`;
+}
 function calibracionCard(){
   if(SHADOW===null){ loadShadow(); return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra)</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando calibración…</p></div>`; }
   const cfgRow=(KPI_CFG||[]).find(k=>k.kpi==='_config');
@@ -2046,9 +2077,10 @@ function calibracionCard(){
   if(!rows) rows=`<tr><td colspan="7" class="empty">Sin corridas todavía. Tocá "Correr ahora" para la primera.</td></tr>`;
   return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra) ${info('El motor calcula cada KPI desde GHL y el tracker, y lo compara con lo cargado a mano. Nada se escribe en los contadores: esto es solo calibración. Cuando un KPI venga clavado varios días, en la Fase B vas a poder graduarlo a automático.')}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-      <button class="btn sm" onclick="runShadow()" id="shadowBtn">Correr ahora</button>
+      <button class="btn sm" onclick="runShadow()" id="shadowBtn">⟳ Recap del día</button>
       <input class="inp" style="max-width:340px" placeholder="Dominios de agenda (coma): agendar.mazefunnels.io" value="${esc(doms)}" onchange="setBookingDomains(this.value)" data-tip="Para contar los links de agenda que envía el setter.">
     </div>
+    ${recapHoy()}
     <div class="rollup"><table>
       <thead><tr><th style="text-align:left">KPI</th><th style="text-align:left">Miembro</th><th>Último día</th><th>Auto</th><th>Manual</th><th>Match 14d</th><th>Racha</th></tr></thead>
       <tbody>${rows}</tbody></table></div></div>`;
