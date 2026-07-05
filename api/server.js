@@ -16,6 +16,7 @@
 //   GET    /api/ghl/calendars      -> calendarios GHL con closers sincronizados (para elegir el de llamadas)
 //   POST   /api/integrations/ghl/calendar -> guarda/desconfigura el calendario de llamadas de la org
 //   GET    /api/ghl/leads          -> leads con cita en el calendario de llamadas de la org (cualquier miembro activo)
+//   GET    /api/capture/ghl        -> autocompletar Cargar día del closer (citas GHL + ventas del día)
 //   POST   /api/sales/ghl          -> cierra el ciclo de la venta en GHL: custom fields + tag + oportunidad + Slack
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 //   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
@@ -505,6 +506,113 @@ async function ghlLeads(req, res, member) {
   leads.sort((a, b) => String(b.cita).localeCompare(String(a.cita)));
   leadsCache.set(member.org_id, { at: now, data: leads });
   return sendJSON(res, 200, { leads });
+}
+
+// ---------- GET /api/capture/ghl ----------
+// Autocompletar Cargar día (Fase 3 carcasa). SOLO closers en v1:
+// - llamadas/asistencias/no_shows: citas del calendario de la org del día pedido,
+//   SOLO las asignadas al ghl_user_id del closer (sin assignedUserId = no certera, se ignora).
+// - cierres/cash_nuevo: st_sales del closer ese día (fuente: el propio tracker).
+// El día se corta en la TZ de la org. Nada se escribe acá: la UI aplica los valores
+// y el usuario guarda por el flujo normal (la RLS de st_entries manda).
+function tzDayRange(dateStr, tz) {
+  const utcMidnight = new Date(dateStr + 'T00:00:00Z').getTime();
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const p = Object.fromEntries(fmt.formatToParts(new Date(utcMidnight)).map((x) => [x.type, x.value]));
+  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+  const offset = asUtc - utcMidnight; // cuánto adelanta el tz respecto de UTC
+  const start = utcMidnight - offset;
+  return { start, end: start + 86400000 };
+}
+
+async function captureGhl(req, res, member, url) {
+  const date = String(url.searchParams.get('date') || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return sendJSON(res, 400, { error: 'Fecha inválida (YYYY-MM-DD)' });
+
+  // Target: uno mismo, o cualquier miembro de la org si el caller es admin.
+  const targetId = url.searchParams.get('member_id') || member.uid;
+  if (targetId !== member.uid && member.role !== 'admin') {
+    return sendJSON(res, 403, { error: 'Solo el admin puede autocompletar el día de otro miembro' });
+  }
+
+  let prof;
+  try {
+    const pr = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(targetId)
+        + '&org_id=eq.' + encodeURIComponent(member.org_id) + '&select=id,role,active,ghl_user_id',
+      { headers: svcHeaders() }
+    );
+    prof = (await pr.json().catch(() => []))[0];
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer el perfil del miembro' });
+  }
+  if (!prof || prof.active === false) return sendJSON(res, 404, { error: 'Miembro no encontrado o inactivo' });
+  if (prof.role !== 'closer') return sendJSON(res, 400, { error: 'El autocompletar está disponible solo para closers (v1)' });
+
+  let creds;
+  try { creds = await getGhlCreds(member.org_id); } catch {
+    return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+  }
+  if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
+  const calendarId = (creds.integration && creds.integration.calendar_id) || GHL_CALENDAR;
+  if (!calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
+
+  // TZ de la org para cortar el día donde corresponde.
+  let tz = 'America/Argentina/Buenos_Aires';
+  try {
+    const or_ = await fetch(SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(member.org_id) + '&select=tz',
+      { headers: svcHeaders() });
+    const orow = (await or_.json().catch(() => []))[0];
+    if (orow && orow.tz) tz = orow.tz;
+  } catch { /* fallback al default */ }
+
+  const metrics = {};
+
+  // Citas del día asignadas al closer (solo si tiene ghl_user_id vinculado).
+  if (prof.ghl_user_id) {
+    let events = [];
+    try {
+      const { start, end } = tzDayRange(date, tz);
+      const evRes = await fetch(
+        `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${start}&endTime=${end}`,
+        { headers: ghlHeaders(creds.token, '2021-04-15') }
+      );
+      const ev = await evRes.json().catch(() => ({}));
+      events = ev.events || [];
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudieron leer las citas de GHL' });
+    }
+    let llamadas = 0, asistencias = 0, noShows = 0;
+    for (const e of events) {
+      if (e.deleted) continue;
+      if (e.assignedUserId !== prof.ghl_user_id) continue; // sin asignación certera no cuenta
+      const st = String(e.appointmentStatus || '').toLowerCase();
+      if (['cancelled', 'invalid'].includes(st)) continue;
+      llamadas++;
+      if (st === 'showed') asistencias++;
+      if (st === 'noshow') noShows++;
+    }
+    metrics.llamadas = { value: llamadas, source: 'ghl' };
+    metrics.asistencias = { value: asistencias, source: 'ghl' };
+    metrics.no_shows = { value: noShows, source: 'ghl' };
+  }
+
+  // Cierres y cash desde las ventas del tracker (fuente de verdad interna).
+  try {
+    const sr = await fetch(
+      SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(member.org_id)
+        + '&closer_id=eq.' + encodeURIComponent(targetId) + '&sale_date=eq.' + encodeURIComponent(date) + '&select=cash',
+      { headers: svcHeaders() }
+    );
+    const sales = await sr.json().catch(() => null);
+    if (Array.isArray(sales)) {
+      metrics.cierres = { value: sales.length, source: 'ventas' };
+      metrics.cash_nuevo = { value: sales.reduce((a, s) => a + (+s.cash || 0), 0), source: 'ventas' };
+    }
+  } catch { /* sin ventas legibles: se omiten esas métricas */ }
+
+  return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics });
 }
 
 // ---------- Calendarios GHL relevantes para la org (Fase 2.3) ----------
@@ -2428,6 +2536,12 @@ const server = http.createServer(async (req, res) => {
       const member = await requireMember(req);
       if (!member.ok) return sendJSON(res, member.status, { error: member.error });
       return ghlLeads(req, res, member);
+    }
+
+    if (req.method === 'GET' && path === '/api/capture/ghl') {
+      const member = await requireMember(req);
+      if (!member.ok) return sendJSON(res, member.status, { error: member.error });
+      return captureGhl(req, res, member, url);
     }
 
     if (req.method === 'POST' && path === '/api/sales/ghl') {
