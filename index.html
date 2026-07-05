@@ -2051,31 +2051,33 @@ async function loadShadow(){
 function recapHoy(){
   const hoy=todayStr();
   const rows=(SHADOW||[]).filter(r=>r.metric_date===hoy);
-  if(!rows.length) return `<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Hoy todavía no hay corrida — tocá el botón para generar el recap.</p>`;
-  const nameOf=(id)=>{ const m=DB.members.find(x=>x.id===id); return m?m.name:'—'; };
   const byMember={};
   rows.forEach(r=>{ (byMember[r.member_id]=byMember[r.member_id]||[]).push(r); });
+  const miembros=DB.members||[];
+  if(!miembros.length) return `<p style="color:var(--muted);font-size:13px;margin:0 0 12px">No hay miembros comerciales en el equipo todavía.</p>`;
   let html='';
-  Object.keys(byMember).forEach(mid=>{
-    const rs=byMember[mid];
+  // Una fila por CADA miembro del equipo — tengan actividad o no.
+  miembros.forEach(m=>{
+    const rs=byMember[m.id]||[];
     const conAlgo=rs.filter(r=>+r.auto_value>0 || (r.manual_value!=null && +r.manual_value!==+r.auto_value));
     const diffs=rs.filter(r=>r.manual_value!=null && +r.manual_value!==+r.auto_value);
-    let detalle;
-    if(!conAlgo.length){ detalle=`<span style="color:var(--muted)">sin actividad medida hoy</span>`; }
+    let detalle, chip='';
+    if(!rs.length){ detalle=`<span style="color:var(--muted)">sin datos del motor todavía</span>`; }
+    else if(!conAlgo.length){ detalle=`<span style="color:var(--muted)">sin actividad medida hoy</span>`; chip=`<span class="cuo-est paga">sin diferencias</span>`; }
     else {
       detalle=conAlgo.map(r=>{
         const mismatch=r.manual_value!=null && +r.manual_value!==+r.auto_value;
         return `<span class="chip" style="${mismatch?'border-color:#ff6b6b;color:#ff6b6b':''}">${esc(r.kpi)}: <b>${+r.auto_value}</b>${r.manual_value!=null?` / manual ${+r.manual_value}`:''}</span>`;
       }).join(' ');
+      chip=diffs.length?`<span class="cuo-est venc">${diffs.length} diferencia${diffs.length>1?'s':''}</span>`:`<span class="cuo-est paga">sin diferencias</span>`;
     }
-    html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <b style="min-width:130px">${esc(nameOf(mid))}</b>${detalle}
-      ${diffs.length?`<span class="cuo-est venc">${diffs.length} diferencia${diffs.length>1?'s':''}</span>`:`<span class="cuo-est paga">sin diferencias</span>`}
+    html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(127,127,127,.1)">
+      <b style="min-width:150px">${esc(m.name)} <span style="color:var(--muted);font-weight:400">· ${ROLE_LABEL[m.role]||m.role}</span></b>${detalle}${chip}
     </div>`;
   });
   const ultima=rows.map(r=>r.computed_at).sort().pop();
   const hora=ultima?new Date(ultima).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'';
-  return `<div style="margin-bottom:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:8px">Recap de HOY (${hoy})${hora?` · última corrida ${hora}`:''}</div>${html}</div>`;
+  return `<div style="margin-bottom:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:8px">Recap de HOY (${hoy})${hora?` · última corrida ${hora}`:' · tocá "Recap del día" para generarlo'}</div>${html}</div>`;
 }
 function calibracionCard(){
   if(SHADOW===null){ loadShadow(); return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra)</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando calibración…</p></div>`; }
