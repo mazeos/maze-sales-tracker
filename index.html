@@ -466,6 +466,7 @@ async function loadFromSupabase(){
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
       members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
+      admins:profs.filter(p=>p.role==='admin' && p.active!==false).map(p=>({id:p.id,name:p.name})),
       entries:{}, goals:{week:((goalRows.find(g=>g.period==='week')||{}).goals)||{}, month:((goalRows.find(g=>g.period==='month')||{}).goals)||{}},
       sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
       cuotas:cuotas.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}))};
@@ -1965,6 +1966,17 @@ function renderTeam(){
   const tzOpts=TZS.map(([v,l])=>`<option value="${v}" ${tz===v?'selected':''}>${l}</option>`).join('');
   const roleOpts=(sel)=>['setter','triage','closer'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
   let list='';
+  // Admins primero (dueños del equipo): solo lectura, no cargan embudo ni tienen rol operativo.
+  (DB.admins||[]).forEach(a=>{
+    const esYo = ME && a.id===ME.id;
+    list+=`<div class="cfg-member">
+      <div class="cfg-line1">
+        <span class="cfg-name" style="font-weight:600;padding:0 4px">${esc(a.name)}${esYo?' <span style="color:var(--muted);font-weight:400">(vos)</span>':''}</span>
+        <span class="pill" style="background:rgba(197,255,73,.14);color:var(--lime-ink,#C5FF49)">Admin</span>
+        <span class="cfg-spacer"></span>
+      </div>
+    </div>`;
+  });
   DB.members.forEach(m=>{
     const line2 = m.role==='closer'
       ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)" ${ro?'disabled':''}>% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
@@ -1979,7 +1991,7 @@ function renderTeam(){
       </div>${line2}
     </div>`;
   });
-  if(!DB.members.length) list=`<div class="empty">Sin miembros todavía.</div>`;
+  if(!DB.members.length && !(DB.admins||[]).length) list=`<div class="empty">Sin miembros todavía.</div>`;
   // Alta manual: solo sin GHL conectado. Con conexión, el equipo se sincroniza
   // 100% desde HighLevel (decisión 2026-07-04). La baja manual (Quitar) queda siempre.
   const addMemberForm=`<div class="section"><div class="eyebrow">Agregar miembro</div>
