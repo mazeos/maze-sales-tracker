@@ -2136,6 +2136,21 @@ async function loadGhlLocation(){
     if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); }
   }catch(e){}
 }
+// Refresca las cuotas desde Supabase (el trigger las genera server-side al
+// registrar una venta, así que el estado local queda viejo hasta este fetch).
+let _cuoRefreshing=false;
+async function refreshCuotas(){
+  if(_cuoRefreshing||!ME) return;
+  _cuoRefreshing=true;
+  try{
+    const fresh=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data;
+    if(fresh){
+      const mapped=fresh.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}));
+      if(JSON.stringify(mapped)!==JSON.stringify(DB.cuotas||[])){ DB.cuotas=mapped; save(); if(state.view==='caja') renderCaja(); }
+    }
+  }catch(e){}
+  _cuoRefreshing=false;
+}
 function moneyFull(n){ return '$'+(+n||0).toLocaleString('es'); }
 function cuotaEstado(c){ if(c.status==='pagada') return 'pagada'; return c.due_date<todayStr()?'vencida':'pendiente'; }
 function renderCaja(){
@@ -2194,6 +2209,7 @@ function renderCaja(){
         <thead><tr><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Cuota</th><th>Monto</th><th>Vence</th><th>Estado</th><th>GHL</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>` + footer();
   loadGhlLocation();
+  refreshCuotas();
 }
 window.setCajaF=(x)=>{ state.cajaF=x; renderCaja(); };
 let _cq; window.setCajaQ=(v)=>{ state.cajaQ=v; clearTimeout(_cq); _cq=setTimeout(renderCaja,250); };
