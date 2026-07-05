@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Sin dependencias npm: la API usa solo el módulo nativo `http` y `fetch` global (Node 22).
 COPY package.json ./
-COPY server.js ./
+COPY server.js metrics.js ./
 
 EXPOSE 3000
 
