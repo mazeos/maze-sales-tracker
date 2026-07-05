@@ -18,6 +18,8 @@
 //   GET    /api/ghl/leads          -> leads con cita en el calendario de llamadas de la org (cualquier miembro activo)
 //   POST   /api/sales/ghl          -> cierra el ciclo de la venta en GHL: custom fields + tag + oportunidad + Slack
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
+//   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
+//   POST   /api/orgs               -> alta de una org + su admin (SOLO super-admins de Maze)
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -26,6 +28,14 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
 const ANON_KEY = process.env.ANON_KEY || '';
 const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Super-admins de la plataforma (equipo Maze): lista de emails separada por comas.
+// Los emails reales NUNCA van al código (repo público): solo por env. Lista vacía
+// = gestión de organizaciones deshabilitada (fail-closed 403).
+const SUPER_ADMINS = (process.env.SUPER_ADMIN_EMAILS || '')
+  .split(',')
+  .map((e) => e.toLowerCase().trim())
+  .filter(Boolean);
 
 // Env vars de la integración GHL (opcionales: la API arranca igual sin ellas).
 // Los valores reales NUNCA van al código (repo público): solo por env.
@@ -213,6 +223,48 @@ async function requireMember(req) {
     return { ok: false, status: 403, error: 'Tu usuario no está activo en el equipo' };
   }
   return { ok: true, uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name };
+}
+
+// ---------- Auth: super-admin de la plataforma (equipo Maze) ----------
+// Valida el JWT contra GoTrue y exige que el email del usuario esté en
+// SUPER_ADMIN_EMAILS. NO toca st_profiles: el super-admin es de plataforma y
+// puede no tener perfil en ninguna org. No reusa checkUserToken porque ese
+// helper descarta el email (y obligaría a una segunda llamada a GoTrue).
+async function requireSuperAdmin(req) {
+  // Lista vacía → fail-closed sin llamar a la red (habilita el smoke test local).
+  if (!SUPER_ADMINS.length) {
+    return { ok: false, status: 403, error: 'Solo el equipo de Maze puede gestionar organizaciones' };
+  }
+
+  let token = (req.headers['authorization'] || '').trim();
+  if (token.toLowerCase().startsWith('bearer ')) token = token.slice(7).trim();
+  if (!token) {
+    return { ok: false, status: 401, error: 'Falta el token de sesión' };
+  }
+
+  let userRes;
+  try {
+    userRes = await fetch(SUPABASE_URL + '/auth/v1/user', {
+      headers: { 'apikey': ANON_KEY, 'Authorization': 'Bearer ' + token },
+    });
+  } catch {
+    return { ok: false, status: 502, error: 'No se pudo validar la sesión con el servidor de auth' };
+  }
+  if (userRes.status !== 200) {
+    return { ok: false, status: 401, error: 'Sesión inválida' };
+  }
+  const user = await userRes.json().catch(() => null);
+  const uid = user && user.id;
+  if (!uid) {
+    return { ok: false, status: 401, error: 'Sesión inválida' };
+  }
+
+  const email = typeof (user && user.email) === 'string' ? user.email.toLowerCase().trim() : '';
+  if (!email || !SUPER_ADMINS.includes(email)) {
+    return { ok: false, status: 403, error: 'Solo el equipo de Maze puede gestionar organizaciones' };
+  }
+
+  return { ok: true, uid, email };
 }
 
 // ---------- Helpers OAuth GHL ----------
@@ -1427,6 +1479,244 @@ async function changeMyPassword(req, res, usr) {
   return sendJSON(res, 200, { ok: true });
 }
 
+// ---------- GET /api/orgs ----------
+// Lista todas las organizaciones del tracker con miembros activos, estado GHL
+// y emails de sus admins. SOLO super-admins (requireSuperAdmin). De
+// st_integrations se leen SOLO org_id y location_name — tokens jamás.
+async function listOrgs(req, res, sa) {
+  let orgs, profs, integrations;
+  try {
+    const orgsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?select=id,name,created_at&order=created_at.asc',
+      { headers: svcHeaders() }
+    );
+    if (orgsRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer las organizaciones' });
+    orgs = await orgsRes.json().catch(() => null);
+
+    const profsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?select=id,org_id,role,active',
+      { headers: svcHeaders() }
+    );
+    if (profsRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer las organizaciones' });
+    profs = await profsRes.json().catch(() => null);
+
+    const intsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?select=org_id,location_name',
+      { headers: svcHeaders() }
+    );
+    if (intsRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer las organizaciones' });
+    integrations = await intsRes.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer las organizaciones' });
+  }
+  if (!Array.isArray(orgs)) orgs = [];
+  if (!Array.isArray(profs)) profs = [];
+  if (!Array.isArray(integrations)) integrations = [];
+
+  // Agrupar en memoria: perfiles por org + integración por org.
+  const profsByOrg = new Map();
+  for (const p of profs) {
+    if (!profsByOrg.has(p.org_id)) profsByOrg.set(p.org_id, []);
+    profsByOrg.get(p.org_id).push(p);
+  }
+  const intByOrg = new Map();
+  for (const i of integrations) intByOrg.set(i.org_id, i);
+
+  // Emails de admins vía GoTrue admin con UN cache compartido para todo el
+  // request (pocas orgs: N+1 aceptable).
+  const emailCache = new Map();
+  const out = [];
+  for (const o of orgs) {
+    const orgProfs = profsByOrg.get(o.id) || [];
+    const admins = [];
+    for (const p of orgProfs) {
+      if (p.role !== 'admin') continue;
+      const email = await getAuthEmail(p.id, emailCache);
+      if (email) admins.push(email);
+    }
+    const integ = intByOrg.get(o.id) || null;
+    out.push({
+      id: o.id,
+      name: o.name,
+      created_at: o.created_at,
+      members_active: orgProfs.filter((p) => p.active !== false).length,
+      ghl_connected: !!integ,
+      ghl_location_name: (integ && integ.location_name) || null,
+      admins,
+    });
+  }
+
+  console.log(`[api] GET /api/orgs super=${sa.email} n=${out.length} -> 200`);
+  return sendJSON(res, 200, { orgs: out });
+}
+
+// ---------- POST /api/orgs ----------
+// Alta de una organización + su admin. SOLO super-admins. Si el email del admin
+// ya existe en el GoTrue COMPARTIDO (tracker, CallIQ…), se resuelve contra el
+// auth user real: perfil en otra org → 409; sin perfil → se adopta la cuenta
+// (JAMÁS se toca su contraseña, patrón importGhlUser). Rollback en toda rama de
+// fallo post-creación: la org creada se borra y el auth user SOLO si fue creado
+// por este endpoint (nunca borrar una cuenta adoptada).
+async function createOrg(req, res, sa) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+
+  const body = parsed.data || {};
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const adminName = typeof body.admin_name === 'string' ? body.admin_name.trim() : '';
+  const adminEmail = typeof body.admin_email === 'string' ? body.admin_email.trim() : '';
+  let password = typeof body.admin_password === 'string' ? body.admin_password : '';
+
+  // Validaciones (mensajes en español latino, tuteo).
+  if (!name) return sendJSON(res, 400, { error: 'Tienes que poner el nombre de la organización' });
+  if (!adminName) return sendJSON(res, 400, { error: 'Tienes que poner el nombre del admin' });
+  if (!adminEmail || !/^\S+@\S+\.\S+$/.test(adminEmail)) {
+    return sendJSON(res, 400, { error: 'El email del admin no es válido' });
+  }
+  if (password && password.length < 8) {
+    return sendJSON(res, 400, { error: 'La contraseña tiene que tener al menos 8 caracteres' });
+  }
+
+  // Password autogenerada (14 chars sin caracteres confusos). NUNCA se loggea.
+  let generated = false;
+  if (!password) {
+    let acc = '';
+    while (acc.length < 14) {
+      acc += crypto.randomBytes(24).toString('base64url').replace(/[-_0OoIl1]/g, '');
+    }
+    password = acc.slice(0, 14);
+    generated = true;
+  }
+
+  // a. Crear la org (tz y team_mode salen de los defaults del schema).
+  let orgId;
+  try {
+    const orgRes = await fetch(SUPABASE_URL + '/rest/v1/st_orgs', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'return=representation' }),
+      body: JSON.stringify({ name }),
+    });
+    const orgRows = await orgRes.json().catch(() => null);
+    const orgRow = Array.isArray(orgRows) ? orgRows[0] : orgRows;
+    if (orgRes.status < 200 || orgRes.status >= 300 || !orgRow || !orgRow.id) {
+      console.log(`[api] POST /api/orgs super=${sa.email} org_fail status=${orgRes.status} -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo crear la organización' });
+    }
+    orgId = orgRow.id;
+  } catch {
+    return sendJSON(res, 500, { error: 'No se pudo crear la organización' });
+  }
+
+  // Rollback best-effort de la org (para toda rama de fallo posterior).
+  const rollbackOrg = async () => {
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId), {
+        method: 'DELETE',
+        headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+      });
+    } catch { /* best-effort rollback */ }
+  };
+
+  // b. Resolver el auth user del admin.
+  const emailNorm = adminEmail.toLowerCase().trim();
+  let uid, createdAuth, existingAccount;
+  let authRes, authUser;
+  try {
+    authRes = await fetch(SUPABASE_URL + '/auth/v1/admin/users', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: JSON.stringify({ email: adminEmail, password, email_confirm: true }),
+    });
+    authUser = await authRes.json().catch(() => ({}));
+  } catch {
+    await rollbackOrg();
+    return sendJSON(res, 502, { error: 'No se pudo crear el usuario en el servidor de auth' });
+  }
+
+  if (authRes.status === 422 || authRes.status === 409 ||
+      (authUser && /already|registered|exists|duplicate/i.test(JSON.stringify(authUser)))) {
+    // El GoTrue es COMPARTIDO entre apps: que el email exista NO implica una
+    // org del tracker. Resolver contra el auth user real.
+    const existingAuth = await findAuthUserByEmail(emailNorm);
+    if (!existingAuth || !existingAuth.id) {
+      // Respuesta genérica: no filtrar información del auth compartido.
+      await rollbackOrg();
+      console.log(`[api] POST /api/orgs super=${sa.email} email_dup_sin_match -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
+    }
+
+    // ¿Tiene perfil en ALGUNA org del tracker? → conflicto real.
+    let dupProf;
+    try {
+      const r = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(existingAuth.id) + '&select=id,org_id',
+        { headers: svcHeaders() }
+      );
+      if (r.status !== 200) { await rollbackOrg(); return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' }); }
+      const rows = await r.json().catch(() => null);
+      dupProf = Array.isArray(rows) ? rows[0] : null;
+    } catch {
+      await rollbackOrg();
+      return sendJSON(res, 502, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
+    }
+    if (dupProf) {
+      await rollbackOrg();
+      console.log(`[api] POST /api/orgs super=${sa.email} email_dup_otra_org -> 409`);
+      return sendJSON(res, 409, { error: 'Ese email ya pertenece a otro equipo del tracker' });
+    }
+
+    // Sin perfil en ninguna org → adoptar la cuenta (de otra app del auth
+    // compartido). JAMÁS tocar su contraseña ni ningún atributo del auth user.
+    uid = existingAuth.id;
+    createdAuth = false;
+    existingAccount = true;
+  } else if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
+    await rollbackOrg();
+    console.log(`[api] POST /api/orgs super=${sa.email} auth_fail status=${authRes.status} -> 500`);
+    return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
+  } else {
+    uid = authUser.id;
+    createdAuth = true;
+    existingAccount = false;
+  }
+
+  // c. Crear el perfil admin de la org nueva.
+  let profRes;
+  try {
+    profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+      body: JSON.stringify({ id: uid, org_id: orgId, name: adminName, role: 'admin', commission: 0 }),
+    });
+  } catch {
+    profRes = { status: 500 };
+  }
+  if (profRes.status < 200 || profRes.status >= 300) {
+    // Rollback doble best-effort: la org SIEMPRE; el auth user SOLO si lo creó
+    // este endpoint (nunca borrar una cuenta adoptada de otra app).
+    await rollbackOrg();
+    if (createdAuth) {
+      try {
+        await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+          method: 'DELETE',
+          headers: svcHeaders(),
+        });
+      } catch { /* best-effort rollback */ }
+    }
+    console.log(`[api] POST /api/orgs super=${sa.email} profile_fail rollback org=${orgId} -> 500`);
+    return sendJSON(res, 500, { error: 'No se pudo crear el admin. No se creó nada.' });
+  }
+
+  // La password viaja UNA sola vez y solo si fue autogenerada para una cuenta
+  // recién creada (si la cuenta ya existía, entra con su contraseña de siempre;
+  // si vino en el body, el super-admin ya la conoce). Jamás en logs.
+  const out = { org: { id: orgId, name }, admin_email: adminEmail, existing_account: existingAccount };
+  if (generated && createdAuth) out.admin_password = password;
+
+  console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} -> 200`);
+  return sendJSON(res, 200, out);
+}
+
 // ---------- Router ----------
 const server = http.createServer(async (req, res) => {
   try {
@@ -1494,6 +1784,13 @@ const server = http.createServer(async (req, res) => {
       const usr = await checkUserToken(req.headers['authorization'] || '');
       if (!usr.ok) return sendJSON(res, usr.status, { error: usr.error });
       return changeMyPassword(req, res, usr);
+    }
+
+    // Gestión de organizaciones: SOLO super-admins de la plataforma (equipo Maze).
+    if (path === '/api/orgs' && (req.method === 'GET' || req.method === 'POST')) {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return req.method === 'GET' ? listOrgs(req, res, sa) : createOrg(req, res, sa);
     }
 
     // Todo lo demás bajo /api/members exige admin.
