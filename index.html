@@ -214,6 +214,7 @@
 
   .section{margin-bottom:22px}
   .cuo-est{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:rgba(127,127,127,.14);color:var(--muted);white-space:nowrap}
+  .ghl-badge{font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:10px;background:rgba(197,255,73,.16);color:var(--lime-ink,#C5FF49);margin-left:6px;vertical-align:middle}
   .cuo-est.venc{background:rgba(255,77,77,.14);color:#ff6b6b}
   .cuo-est.paga{background:rgba(74,222,128,.14);color:#4ade80}
   .section .eyebrow{margin-bottom:12px}
@@ -890,11 +891,12 @@ function renderCapture(){
     let taps='';
     METRICS[member.role].forEach(mt=>{
       const val = +cur[mt.k]||0;
+      const gb=(state.ghlFill&&state.ghlFill[mt.k])?`<span class="ghl-badge" id="gb_${mt.k}">${state.ghlFill[mt.k]}</span>`:'';
       if(mt.money){
-        taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
+        taps+=`<div class="tap"><div><div class="tl">${mt.label}${gb}</div><div class="def">${mt.def}</div></div>
           <div class="tr"><input class="money-in" type="number" min="0" value="${val}" onchange="setMoney('${mt.k}', this.value)"></div></div>`;
       } else {
-        taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
+        taps+=`<div class="tap"><div><div class="tl">${mt.label}${gb}</div><div class="def">${mt.def}</div></div>
           <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}" ondblclick="editNum('${mt.k}')" title="Doble clic para escribir el número">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
       }
     });
@@ -908,6 +910,7 @@ function renderCapture(){
         <select class="chip" onchange="setCapMember(this.value)" data-tip="De quién estás cargando el día.">${memberOpts}</select>
         <input class="chip inp" style="width:auto" type="date" value="${state.capDate}" max="${todayStr()}" onchange="setCapDate(this.value)" data-tip="Podés cargar o corregir cualquier día pasado.">
         <span class="chip"><span class="k">Rol</span> ${ROLE_LABEL[member.role]}</span>
+        ${member.role==='closer' ? `<button class="chip" id="ghlFillBtn" onclick="autofillGhl()" data-tip="Trae lo certero: citas del calendario (llamadas, asistencias, no-shows) y cierres/cash de tus Ventas del día. Revisás y listo.">⚡ Autocompletar</button>` : ''}
         <span class="savepill" id="savePill">✓ Guardado</span>
       </div>
       <div class="taps">${taps}</div>
@@ -923,10 +926,35 @@ function captureSummary(member,key){
   if(member.role==='triage'){ return `asistencia <b>${fmtPct(cur.asistencias,cur.agendadas)}</b>`; }
   return `cierre <b>${fmtPct(cur.cierres,cur.ofertas)}</b>`;
 }
-window.setCapMember=(id)=>{ state.capMember=id; renderCapture(); };
-window.setCapDate=(d)=>{ state.capDate=d||todayStr(); renderCapture(); };
+window.setCapMember=(id)=>{ state.capMember=id; state.ghlFill=null; renderCapture(); };
+window.setCapDate=(d)=>{ state.capDate=d||todayStr(); state.ghlFill=null; renderCapture(); };
+// Badge "GHL/Ventas" desaparece apenas el usuario toca el valor a mano.
+function clearGhlBadge(k){ if(state.ghlFill&&state.ghlFill[k]){ delete state.ghlFill[k]; const b=document.getElementById('gb_'+k); if(b) b.remove(); } }
+// Trae lo certero del día (endpoint /api/capture/ghl) y lo aplica al contador.
+// Nada se persiste acá distinto del flujo normal: save() de siempre.
+window.autofillGhl=async()=>{
+  const btn=document.getElementById('ghlFillBtn'); if(btn){ btn.disabled=true; btn.textContent='Trayendo…'; }
+  const fail=(msg)=>{ if(btn){ btn.disabled=false; btn.textContent='⚡ Autocompletar'; } if(msg) toast(msg); };
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){ fail('Tu sesión venció, volvé a entrar'); return; }
+    const q=new URLSearchParams({date:state.capDate}); if(ME&&state.capMember!==ME.id) q.set('member_id',state.capMember);
+    const r=await fetch('/api/capture/ghl?'+q.toString(),{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(r.status===501){ if(btn) btn.style.display='none'; return; }
+    const j=await r.json().catch(()=>null);
+    if(!r.ok||!j||!j.metrics){ fail((j&&j.error)||'No se pudo traer de GHL, cargá a mano'); return; }
+    const key=state.capMember+'|'+state.capDate;
+    if(!DB.entries[key]) DB.entries[key]={};
+    state.ghlFill={};
+    let n=0;
+    for(const k in j.metrics){ DB.entries[key][k]=+j.metrics[k].value||0; state.ghlFill[k]=j.metrics[k].source==='ghl'?'GHL':'Ventas'; n++; }
+    save(); renderCapture();
+    toast(n?`${n} métricas traídas — revisá y listo, se guardan solas`:'No hay nada certero para traer en este día');
+  }catch(e){ fail('No se pudo traer de GHL, cargá a mano'); }
+};
 function flashSave(){ const p=document.getElementById('savePill'); if(!p) return; p.textContent='✓ Guardado'; p.classList.add('flash'); clearTimeout(flashSave._t); flashSave._t=setTimeout(()=>{p.classList.remove('flash');},700); }
 window.bump=(k,dir)=>{
+  clearGhlBadge(k);
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
   const v=Math.max(0,(+DB.entries[key][k]||0)+dir);
@@ -937,6 +965,7 @@ window.bump=(k,dir)=>{
   flashSave();
 };
 window.setNum=(k,val)=>{
+  clearGhlBadge(k);
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
   const v=Math.max(0,Math.round(+val||0));
@@ -960,6 +989,7 @@ window.editNum=(k)=>{
   inp.addEventListener('blur',commit);
 };
 window.setMoney=(k,val)=>{
+  clearGhlBadge(k);
   const key=state.capMember+'|'+state.capDate;
   if(!DB.entries[key]) DB.entries[key]={};
   DB.entries[key][k]=Math.max(0,+val||0); save(); flashSave();
