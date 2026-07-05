@@ -2197,6 +2197,77 @@ function renderCaja(){
 }
 window.setCajaF=(x)=>{ state.cajaF=x; renderCaja(); };
 let _cq; window.setCajaQ=(v)=>{ state.cajaQ=v; clearTimeout(_cq); _cq=setTimeout(renderCaja,250); };
+window.closeCuotaModal=()=>{ const ov=document.getElementById('cuoOv'); if(ov) ov.style.display='none'; };
+function cuotaOverlay(){
+  let ov=document.getElementById('cuoOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='cuoOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeCuotaModal(); });
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+window.openCobrarModal=(id)=>{
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(!c) return;
+  const s=DB.sales.find(x=>x.id===c.sale_id)||{};
+  const ov=cuotaOverlay();
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closeCuotaModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Cobrar cuota</div><h3>${esc(s.cliente||'—')} · cuota ${c.numero}</h3></div></div>
+    <p class="drill-def">Agendada: ${moneyFull(c.monto)} · vence ${c.due_date}. Si entró un monto distinto, corregilo acá: la caja registra lo que entró de verdad.</p>
+    <form onsubmit="return submitCobro(event,'${c.id}')">
+      <div class="field"><label>Monto que entró ($)</label><input class="inp" id="cu_amount" type="number" step="0.01" min="0.01" value="${+c.monto}" required></div>
+      <div class="field" style="margin:10px 0 16px"><label>Fecha del cobro</label><input class="inp" id="cu_date" type="date" value="${todayStr()}" required></div>
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closeCuotaModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="cu_btn">Registrar cobro</button>
+      </div>
+    </form></div>`;
+  ov.style.display='flex';
+  document.getElementById('cu_amount').focus();
+};
+window.submitCobro=async(ev,id)=>{
+  ev.preventDefault();
+  const amount=+document.getElementById('cu_amount').value||0;
+  const date=document.getElementById('cu_date').value;
+  if(amount<=0||!date){ toast('Monto y fecha son obligatorios'); return false; }
+  const btn=document.getElementById('cu_btn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const {error}=await sb.from('st_cuotas').update({status:'pagada',paid_amount:amount,paid_date:date}).eq('id',id);
+  if(error){ toast('No se pudo (permiso)'); if(btn){ btn.disabled=false; btn.textContent='Registrar cobro'; } return false; }
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(c){ c.status='pagada'; c.paid_amount=amount; c.paid_date=date; }
+  save(); closeCuotaModal(); toast('Cobro registrado 💰'); renderCaja();
+  return false;
+};
+window.openEditCuotaModal=(id)=>{
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(!c) return;
+  const s=DB.sales.find(x=>x.id===c.sale_id)||{};
+  const ov=cuotaOverlay();
+  ov.innerHTML=`<div class="drill" style="max-width:380px">
+    <button class="drill-x" onclick="closeCuotaModal()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Editar cuota</div><h3>${esc(s.cliente||'—')} · cuota ${c.numero}</h3></div></div>
+    <p class="drill-def">Ajustá el acuerdo real con el cliente: monto o fecha de vencimiento.</p>
+    <form onsubmit="return submitEditCuota(event,'${c.id}')">
+      <div class="field"><label>Monto ($)</label><input class="inp" id="ce_amount" type="number" step="0.01" min="0.01" value="${+c.monto}" required></div>
+      <div class="field" style="margin:10px 0 16px"><label>Vence</label><input class="inp" id="ce_date" type="date" value="${c.due_date}" required></div>
+      <div style="display:flex;gap:9px;justify-content:flex-end">
+        <button class="btn ghost sm" type="button" onclick="closeCuotaModal()">Cancelar</button>
+        <button class="btn sm" type="submit" id="ce_btn">Guardar</button>
+      </div>
+    </form></div>`;
+  ov.style.display='flex';
+};
+window.submitEditCuota=async(ev,id)=>{
+  ev.preventDefault();
+  const monto=+document.getElementById('ce_amount').value||0;
+  const due=document.getElementById('ce_date').value;
+  if(monto<=0||!due){ toast('Monto y fecha son obligatorios'); return false; }
+  const btn=document.getElementById('ce_btn'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const {error}=await sb.from('st_cuotas').update({monto,due_date:due}).eq('id',id);
+  if(error){ toast('No se pudo (permiso)'); if(btn){ btn.disabled=false; btn.textContent='Guardar'; } return false; }
+  const c=(DB.cuotas||[]).find(x=>x.id===id); if(c){ c.monto=monto; c.due_date=due; }
+  save(); closeCuotaModal(); toast('Cuota actualizada'); renderCaja();
+  return false;
+};
 
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
