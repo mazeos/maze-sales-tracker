@@ -1628,6 +1628,105 @@ async function listOrgs(req, res, sa) {
   return sendJSON(res, 200, { orgs: out });
 }
 
+// ---------- Helper compartido: alta/adopción del admin de una org ----------
+// Fuente única de verdad para dar de alta un admin (POST /api/orgs y
+// POST /api/orgs/{orgId}/admins). Resuelve el auth user (crear en GoTrue con
+// email_confirm; si el email ya existe en el auth COMPARTIDO → adoptar la
+// cuenta SIN tocar su contraseña, salvo que tenga perfil en alguna org del
+// tracker → 409) e inserta el perfil admin en la org. Si el INSERT del perfil
+// falla, borra el auth user SOLO si lo creó este helper (jamás una cuenta
+// adoptada). NO rollbackea la org: eso es responsabilidad del caller.
+// Passwords JAMÁS en logs.
+// Retorno: {ok:true, uid, createdAuth, existingAccount} | {ok:false, status, error}
+async function provisionOrgAdmin({ orgId, name, email, password }, logTag) {
+  const emailNorm = email.toLowerCase().trim();
+  let uid, createdAuth, existingAccount;
+
+  // 1. Intentar crear el auth user.
+  let authRes, authUser;
+  try {
+    authRes = await fetch(SUPABASE_URL + '/auth/v1/admin/users', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: JSON.stringify({ email, password, email_confirm: true }),
+    });
+    authUser = await authRes.json().catch(() => ({}));
+  } catch {
+    return { ok: false, status: 502, error: 'No se pudo crear el usuario en el servidor de auth' };
+  }
+
+  if (authRes.status === 422 || authRes.status === 409 ||
+      (authUser && /already|registered|exists|duplicate/i.test(JSON.stringify(authUser)))) {
+    // El GoTrue es COMPARTIDO entre apps: que el email exista NO implica una
+    // org del tracker. Resolver contra el auth user real.
+    const existingAuth = await findAuthUserByEmail(emailNorm);
+    if (!existingAuth || !existingAuth.id) {
+      // Respuesta genérica: no filtrar información del auth compartido.
+      console.log(`[api] ${logTag} email_dup_sin_match -> 500`);
+      return { ok: false, status: 500, error: 'No se pudo crear el usuario. Inténtalo de nuevo.' };
+    }
+
+    // ¿Tiene perfil en ALGUNA org del tracker? → conflicto real.
+    let dupProf;
+    try {
+      const r = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(existingAuth.id) + '&select=id,org_id',
+        { headers: svcHeaders() }
+      );
+      if (r.status !== 200) return { ok: false, status: 500, error: 'No se pudo crear el usuario. Inténtalo de nuevo.' };
+      const rows = await r.json().catch(() => null);
+      dupProf = Array.isArray(rows) ? rows[0] : null;
+    } catch {
+      return { ok: false, status: 502, error: 'No se pudo crear el usuario. Inténtalo de nuevo.' };
+    }
+    if (dupProf) {
+      console.log(`[api] ${logTag} email_dup_otra_org -> 409`);
+      return { ok: false, status: 409, error: 'Ese email ya pertenece a otro equipo del tracker' };
+    }
+
+    // Sin perfil en ninguna org → adoptar la cuenta (de otra app del auth
+    // compartido). JAMÁS tocar su contraseña ni ningún atributo del auth user.
+    uid = existingAuth.id;
+    createdAuth = false;
+    existingAccount = true;
+  } else if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
+    console.log(`[api] ${logTag} auth_fail status=${authRes.status} -> 500`);
+    return { ok: false, status: 500, error: 'No se pudo crear el usuario. Inténtalo de nuevo.' };
+  } else {
+    uid = authUser.id;
+    createdAuth = true;
+    existingAccount = false;
+  }
+
+  // 2. Crear el perfil admin en la org.
+  let profRes;
+  try {
+    profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+      body: JSON.stringify({ id: uid, org_id: orgId, name, role: 'admin', commission: 0 }),
+    });
+  } catch {
+    profRes = { status: 500 };
+  }
+  if (profRes.status < 200 || profRes.status >= 300) {
+    // Rollback best-effort: el auth user SOLO si lo creó este helper (nunca
+    // borrar una cuenta adoptada de otra app).
+    if (createdAuth) {
+      try {
+        await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+          method: 'DELETE',
+          headers: svcHeaders(),
+        });
+      } catch { /* best-effort rollback */ }
+    }
+    console.log(`[api] ${logTag} profile_fail rollback org=${orgId} -> 500`);
+    return { ok: false, status: 500, error: 'No se pudo crear el admin. No se creó nada.' };
+  }
+
+  return { ok: true, uid, createdAuth, existingAccount };
+}
+
 // ---------- POST /api/orgs ----------
 // Alta de una organización + su admin. SOLO super-admins. Si el email del admin
 // ya existe en el GoTrue COMPARTIDO (tracker, CallIQ…), se resuelve contra el
@@ -1743,95 +1842,18 @@ async function createOrg(req, res, sa) {
     } catch { /* best-effort rollback */ }
   };
 
-  // b. Resolver el auth user del admin.
-  const emailNorm = adminEmail.toLowerCase().trim();
-  let uid, createdAuth, existingAccount;
-  let authRes, authUser;
-  try {
-    authRes = await fetch(SUPABASE_URL + '/auth/v1/admin/users', {
-      method: 'POST',
-      headers: svcHeaders(),
-      body: JSON.stringify({ email: adminEmail, password, email_confirm: true }),
-    });
-    authUser = await authRes.json().catch(() => ({}));
-  } catch {
+  // b+c. Resolver el auth user del admin + perfil (helper compartido con
+  // POST /api/orgs/{orgId}/admins). Toda rama de fallo del helper rollbackea
+  // la org recién creada; el auth user lo maneja el propio helper.
+  const prov = await provisionOrgAdmin(
+    { orgId, name: adminName, email: adminEmail, password },
+    `POST /api/orgs super=${sa.email}`
+  );
+  if (!prov.ok) {
     await rollbackOrg();
-    return sendJSON(res, 502, { error: 'No se pudo crear el usuario en el servidor de auth' });
+    return sendJSON(res, prov.status, { error: prov.error });
   }
-
-  if (authRes.status === 422 || authRes.status === 409 ||
-      (authUser && /already|registered|exists|duplicate/i.test(JSON.stringify(authUser)))) {
-    // El GoTrue es COMPARTIDO entre apps: que el email exista NO implica una
-    // org del tracker. Resolver contra el auth user real.
-    const existingAuth = await findAuthUserByEmail(emailNorm);
-    if (!existingAuth || !existingAuth.id) {
-      // Respuesta genérica: no filtrar información del auth compartido.
-      await rollbackOrg();
-      console.log(`[api] POST /api/orgs super=${sa.email} email_dup_sin_match -> 500`);
-      return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
-    }
-
-    // ¿Tiene perfil en ALGUNA org del tracker? → conflicto real.
-    let dupProf;
-    try {
-      const r = await fetch(
-        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(existingAuth.id) + '&select=id,org_id',
-        { headers: svcHeaders() }
-      );
-      if (r.status !== 200) { await rollbackOrg(); return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' }); }
-      const rows = await r.json().catch(() => null);
-      dupProf = Array.isArray(rows) ? rows[0] : null;
-    } catch {
-      await rollbackOrg();
-      return sendJSON(res, 502, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
-    }
-    if (dupProf) {
-      await rollbackOrg();
-      console.log(`[api] POST /api/orgs super=${sa.email} email_dup_otra_org -> 409`);
-      return sendJSON(res, 409, { error: 'Ese email ya pertenece a otro equipo del tracker' });
-    }
-
-    // Sin perfil en ninguna org → adoptar la cuenta (de otra app del auth
-    // compartido). JAMÁS tocar su contraseña ni ningún atributo del auth user.
-    uid = existingAuth.id;
-    createdAuth = false;
-    existingAccount = true;
-  } else if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
-    await rollbackOrg();
-    console.log(`[api] POST /api/orgs super=${sa.email} auth_fail status=${authRes.status} -> 500`);
-    return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
-  } else {
-    uid = authUser.id;
-    createdAuth = true;
-    existingAccount = false;
-  }
-
-  // c. Crear el perfil admin de la org nueva.
-  let profRes;
-  try {
-    profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
-      method: 'POST',
-      headers: svcHeaders({ 'Prefer': 'return=minimal' }),
-      body: JSON.stringify({ id: uid, org_id: orgId, name: adminName, role: 'admin', commission: 0 }),
-    });
-  } catch {
-    profRes = { status: 500 };
-  }
-  if (profRes.status < 200 || profRes.status >= 300) {
-    // Rollback doble best-effort: la org SIEMPRE; el auth user SOLO si lo creó
-    // este endpoint (nunca borrar una cuenta adoptada de otra app).
-    await rollbackOrg();
-    if (createdAuth) {
-      try {
-        await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
-          method: 'DELETE',
-          headers: svcHeaders(),
-        });
-      } catch { /* best-effort rollback */ }
-    }
-    console.log(`[api] POST /api/orgs super=${sa.email} profile_fail rollback org=${orgId} -> 500`);
-    return sendJSON(res, 500, { error: 'No se pudo crear el admin. No se creó nada.' });
-  }
+  const { uid, createdAuth, existingAccount } = prov;
 
   // La password viaja UNA sola vez y solo si fue autogenerada para una cuenta
   // recién creada (si la cuenta ya existía, entra con su contraseña de siempre;
@@ -1864,6 +1886,206 @@ async function createOrg(req, res, sa) {
   }
 
   console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} location=${locationId || '-'} -> 200`);
+  return sendJSON(res, 200, out);
+}
+
+// ---------- GET /api/orgs/{orgId}/members ----------
+// Miembros de una org (nombre, email, rol, activo, origen GHL/manual).
+// SOLO super-admins. El email sale de GoTrue admin con cache por request.
+async function listOrgMembers(req, res, sa, orgId) {
+  // La org tiene que existir (evita responder listas vacías para ids basura).
+  let orgRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=id',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudo leer la organización' });
+    orgRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer la organización' });
+  }
+  if (!Array.isArray(orgRows) || !orgRows[0]) {
+    return sendJSON(res, 404, { error: 'Esa organización no existe' });
+  }
+
+  let profRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
+        + '&select=id,name,role,active,ghl_user_id&order=name.asc',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los miembros' });
+    profRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer los miembros' });
+  }
+
+  const profiles = Array.isArray(profRows) ? profRows : [];
+  const emailCache = new Map(); // un Map por request (patrón getAuthEmail)
+  const members = [];
+  for (const p of profiles) {
+    members.push({
+      id: p.id,
+      name: p.name,
+      email: await getAuthEmail(p.id, emailCache),
+      role: p.role,
+      active: p.active !== false,
+      ghl: !!p.ghl_user_id,
+    });
+  }
+
+  console.log(`[api] GET /api/orgs/${orgId}/members super=${sa.email} count=${members.length} -> 200`);
+  return sendJSON(res, 200, { members });
+}
+
+// ---------- PATCH /api/orgs/{orgId}/members/{uid} ----------
+// Cambia rol y/o activo de un miembro. SOLO super-admins. Protección de último
+// admin: ningún cambio puede dejar a la org sin al menos un admin activo.
+// active=false banea el auth user (best-effort, patrón deleteMember);
+// active=true lo desbanea.
+async function patchOrgMember(req, res, sa, orgId, uid) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const body = parsed.data || {};
+
+  const hasRole = body.role !== undefined;
+  const hasActive = body.active !== undefined;
+  if (!hasRole && !hasActive) {
+    return sendJSON(res, 400, { error: 'Tienes que mandar al menos un cambio (rol o activo)' });
+  }
+  const ROLES = ['admin', 'setter', 'triage', 'closer'];
+  if (hasRole && !ROLES.includes(body.role)) {
+    return sendJSON(res, 400, { error: 'Ese rol no es válido' });
+  }
+  if (hasActive && typeof body.active !== 'boolean') {
+    return sendJSON(res, 400, { error: 'El campo activo tiene que ser verdadero o falso' });
+  }
+
+  // Perfiles de la org: valida pertenencia (anti cross-org, patrón deleteMember)
+  // y alimenta la protección de último admin en una sola lectura.
+  let profRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,active',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los miembros' });
+    profRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron leer los miembros' });
+  }
+  const profiles = Array.isArray(profRows) ? profRows : [];
+  const target = profiles.find((p) => p && p.id === uid);
+  if (!target) {
+    return sendJSON(res, 404, { error: 'Ese miembro no pertenece a esa organización' });
+  }
+
+  // Simular el cambio sobre el target: si la org queda sin ningún admin activo
+  // (por degradar el rol O por desactivar), se rechaza.
+  const nextRole = hasRole ? body.role : target.role;
+  const nextActive = hasActive ? body.active : target.active !== false;
+  const adminsActivos = profiles.filter((p) => {
+    const role = p.id === uid ? nextRole : p.role;
+    const active = p.id === uid ? nextActive : p.active !== false;
+    return role === 'admin' && active;
+  });
+  if (!adminsActivos.length) {
+    return sendJSON(res, 400, { error: 'La organización no puede quedar sin admin' });
+  }
+
+  // Aplicar el cambio (filtrado por id + org_id: defensa extra anti cross-org).
+  const patch = {};
+  if (hasRole) patch.role = body.role;
+  if (hasActive) patch.active = body.active;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid)
+        + '&org_id=eq.' + encodeURIComponent(orgId),
+      { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify(patch) }
+    );
+    if (r.status < 200 || r.status >= 300) {
+      console.log(`[api] PATCH /api/orgs/${orgId}/members super=${sa.email} patch_fail uid=${uid} status=${r.status} -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo actualizar al miembro' });
+    }
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo actualizar al miembro' });
+  }
+
+  // Ban/unban best-effort: el active=false ya bloquea vía checkUserToken.
+  if (hasActive) {
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+        method: 'PUT',
+        headers: svcHeaders(),
+        body: JSON.stringify({ ban_duration: body.active ? 'none' : '87600h' }),
+      });
+    } catch { /* best-effort: el soft-delete ya impide el acceso */ }
+  }
+
+  console.log(`[api] PATCH /api/orgs/${orgId}/members super=${sa.email} uid=${uid} role=${hasRole ? body.role : '-'} active=${hasActive ? body.active : '-'} -> 200`);
+  return sendJSON(res, 200, { ok: true });
+}
+
+// ---------- POST /api/orgs/{orgId}/admins ----------
+// Agrega un admin a una org EXISTENTE. SOLO super-admins. Reutiliza
+// provisionOrgAdmin (misma lógica de alta/adopción que POST /api/orgs).
+// La password autogenerada viaja UNA sola vez y solo si la cuenta es nueva.
+async function addOrgAdmin(req, res, sa, orgId) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const body = parsed.data || {};
+
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  let password = typeof body.password === 'string' ? body.password : '';
+
+  if (!name) return sendJSON(res, 400, { error: 'Tienes que poner el nombre del admin' });
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    return sendJSON(res, 400, { error: 'El email del admin no es válido' });
+  }
+  if (password && password.length < 8) {
+    return sendJSON(res, 400, { error: 'La contraseña tiene que tener al menos 8 caracteres' });
+  }
+
+  // Password autogenerada (14 chars sin caracteres confusos). NUNCA se loggea.
+  let generated = false;
+  if (!password) {
+    let acc = '';
+    while (acc.length < 14) {
+      acc += crypto.randomBytes(24).toString('base64url').replace(/[-_0OoIl1]/g, '');
+    }
+    password = acc.slice(0, 14);
+    generated = true;
+  }
+
+  // La org tiene que existir.
+  let orgRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=id',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudo leer la organización' });
+    orgRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer la organización' });
+  }
+  if (!Array.isArray(orgRows) || !orgRows[0]) {
+    return sendJSON(res, 404, { error: 'Esa organización no existe' });
+  }
+
+  const prov = await provisionOrgAdmin(
+    { orgId, name, email, password },
+    `POST /api/orgs/${orgId}/admins super=${sa.email}`
+  );
+  if (!prov.ok) return sendJSON(res, prov.status, { error: prov.error });
+
+  const out = { admin_email: email, existing_account: prov.existingAccount };
+  if (generated && prov.createdAuth) out.admin_password = password;
+
+  console.log(`[api] POST /api/orgs/${orgId}/admins super=${sa.email} admin=${prov.uid} existing=${prov.existingAccount} -> 200`);
   return sendJSON(res, 200, out);
 }
 
@@ -2092,6 +2314,28 @@ const server = http.createServer(async (req, res) => {
       const sa = await requireSuperAdmin(req);
       if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
       return req.method === 'GET' ? listOrgs(req, res, sa) : createOrg(req, res, sa);
+    }
+
+    // Gestión de miembros por org: SOLO super-admins (mismo guard fail-closed).
+    const orgMembersMatch = path.match(/^\/api\/orgs\/([^/]+)\/members$/);
+    if (orgMembersMatch && req.method === 'GET') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return listOrgMembers(req, res, sa, decodeURIComponent(orgMembersMatch[1]));
+    }
+
+    const orgMemberMatch = path.match(/^\/api\/orgs\/([^/]+)\/members\/([^/]+)$/);
+    if (orgMemberMatch && req.method === 'PATCH') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return patchOrgMember(req, res, sa, decodeURIComponent(orgMemberMatch[1]), decodeURIComponent(orgMemberMatch[2]));
+    }
+
+    const orgAdminsMatch = path.match(/^\/api\/orgs\/([^/]+)\/admins$/);
+    if (orgAdminsMatch && req.method === 'POST') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return addOrgAdmin(req, res, sa, decodeURIComponent(orgAdminsMatch[1]));
     }
 
     // Vista Plataforma: SOLO super-admins (mismo guard fail-closed que /api/orgs).
