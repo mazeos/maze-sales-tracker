@@ -52,7 +52,7 @@ const GHL_ENABLED = !!(GHL_CLIENT_ID && GHL_CLIENT_SECRET && PUBLIC_URL);
 const GHL_REDIRECT_URI = PUBLIC_URL + '/api/oauth/callback';
 
 // Scopes que pide la app del Marketplace (space-separated).
-const GHL_SCOPES = 'users.readonly calendars.readonly calendars/events.readonly contacts.readonly contacts.write opportunities.readonly opportunities.write conversations/message.readonly locations.readonly';
+const GHL_SCOPES = 'users.readonly calendars.readonly calendars/events.readonly contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly conversations/message.readonly locations.readonly';
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
   console.error('[api] Faltan env vars: SUPABASE_URL, SERVICE_ROLE_KEY y/o ANON_KEY. La API no puede arrancar.');
