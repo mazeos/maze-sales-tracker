@@ -465,8 +465,9 @@ async function loadFromSupabase(){
   const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
-      members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
-      admins:profs.filter(p=>p.role==='admin' && p.active!==false).map(p=>({id:p.id,name:p.name})),
+      members:[...profs.filter(p=>p.role!=='admin' && p.active!==false).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
+               ...profs.filter(p=>p.role==='admin' && p.active!==false && p.sales_role).map(p=>({id:p.id,name:p.name,role:p.sales_role,commission:+p.commission||0,isAdmin:true}))].sort((a,b)=>order[a.role]-order[b.role]),
+      admins:profs.filter(p=>p.role==='admin' && p.active!==false).map(p=>({id:p.id,name:p.name,sales_role:p.sales_role||''})),
       entries:{}, goals:{week:((goalRows.find(g=>g.period==='week')||{}).goals)||{}, month:((goalRows.find(g=>g.period==='month')||{}).goals)||{}},
       sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
       cuotas:cuotas.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}))};
@@ -1966,18 +1967,25 @@ function renderTeam(){
   const tzOpts=TZS.map(([v,l])=>`<option value="${v}" ${tz===v?'selected':''}>${l}</option>`).join('');
   const roleOpts=(sel)=>['setter','triage','closer'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
   let list='';
-  // Admins primero (dueños del equipo): solo lectura, no cargan embudo ni tienen rol operativo.
+  // Admins primero (dueños del equipo). Pueden tener un rol comercial opcional
+  // (dueño que también vende): si lo tienen, además operan como ese rol.
+  const salesRoleOpts=(sel)=>['','setter','triage','closer'].map(r=>`<option value="${r}" ${(sel||'')===r?'selected':''}>${r?ROLE_LABEL[r]:'— Sin rol comercial —'}</option>`).join('');
   (DB.admins||[]).forEach(a=>{
     const esYo = ME && a.id===ME.id;
+    const mem = a.sales_role==='closer' ? DB.members.find(x=>x.id===a.id) : null;
+    const line2 = mem
+      ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${mem.commission||0}" onchange="setCommission('${a.id}',this.value)" ${ro?'disabled':''}>% · A cobrar este mes: <b id="pay_${a.id}">${money(closerPayout(mem))}</b></div>`
+      : '';
     list+=`<div class="cfg-member">
       <div class="cfg-line1">
         <span class="cfg-name" style="font-weight:600;padding:0 4px">${esc(a.name)}${esYo?' <span style="color:var(--muted);font-weight:400">(vos)</span>':''}</span>
         <span class="pill" style="background:rgba(197,255,73,.14);color:var(--lime-ink,#C5FF49)">Admin</span>
+        <select class="inp cfg-role" onchange="setSalesRole('${a.id}',this.value)" data-tip="Rol comercial opcional: si este admin también setea o cierra, se suma al embudo con ese rol." ${ro?'disabled':''}>${salesRoleOpts(a.sales_role)}</select>
         <span class="cfg-spacer"></span>
-      </div>
+      </div>${line2}
     </div>`;
   });
-  DB.members.forEach(m=>{
+  DB.members.filter(m=>!m.isAdmin).forEach(m=>{
     const line2 = m.role==='closer'
       ? `<div class="cfg-line2"><span class="pill closer">Closer</span>Comisión <input class="inp" type="number" min="0" max="100" value="${m.commission||0}" onchange="setCommission('${m.id}',this.value)" ${ro?'disabled':''}>% · A cobrar este mes: <b id="pay_${m.id}">${money(closerPayout(m))}</b></div>`
       : '';
@@ -2120,6 +2128,9 @@ window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
 window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
 window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
 window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+// Rol comercial de un admin (opcional). Persiste directo en st_profiles.sales_role
+// y recarga para que el embudo/atribución lo tomen como ese rol.
+window.setSalesRole=async(id,v)=>{ if(!IS_ADMIN) return; const val=['setter','triage','closer'].includes(v)?v:null; const {error}=await sb.from('st_profiles').update({sales_role:val}).eq('id',id); if(error){ toast('No se pudo guardar'); return; } await loadFromSupabase(); toast('Rol comercial guardado'); renderTeam(); };
 window.setCommissionBase=(v)=>{ if(!IS_ADMIN) return; DB.team.commission_base=(v==='cobrado')?'cobrado':'contador'; save(); toast('Base de comisiones guardada'); renderTeam(); };
 window.setCommission=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
 window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
