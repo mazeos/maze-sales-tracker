@@ -2018,6 +2018,7 @@ function renderSales(){
       <div class="grid2">
         <div class="field" id="s_lead_wrap" style="display:none"><label>Cliente (estuvo en llamada)</label><select class="inp" id="s_lead" onchange="document.getElementById('s_cliente_wrap').style.display=this.value==='__manual__'?'':'none'"><option value="">Cargando leads con cita…</option></select></div>
         <div class="field" id="s_cliente_wrap"><label>Nombre del cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+        <div id="s_lead_hint" style="display:none;grid-column:1/-1;color:var(--muted);font-size:12.5px;padding:2px 2px 0">ℹ No encontramos llamadas recientes en el calendario — cargá el cliente a mano.</div>
         <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="High Ticket / Membresía / Lite"></div>
         <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="4000"></div>
         <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2000"></div>
@@ -2048,21 +2049,22 @@ function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div clas
 let GHL_LEADS=[];
 async function loadGhlLeads(){
   const sel=document.getElementById('s_lead'); if(!sel) return;
-  const manualMode=()=>{
+  const manualMode=(showHint)=>{
     GHL_LEADS=[];
     const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='none';
     const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='';
     const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta';
+    const h=document.getElementById('s_lead_hint'); if(h) h.style.display=showHint?'':'none';
   };
   let j=null;
   try{
     const {data:{session}}=await sb.auth.getSession();
-    if(!session){ manualMode(); return; }
+    if(!session){ manualMode(false); return; }
     const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
-    if(!r.ok){ manualMode(); return; }
+    if(!r.ok){ manualMode(true); return; }
     j=await r.json();
-  }catch(e){ manualMode(); return; }
-  if(!j || !j.leads || !j.leads.length){ manualMode(); return; }
+  }catch(e){ manualMode(true); return; }
+  if(!j || !j.leads || !j.leads.length){ manualMode(true); return; }
   GHL_LEADS=j.leads;
   const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
   sel.innerHTML = `<option value="">— Elegí el lead de la llamada —</option>`
