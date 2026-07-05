@@ -20,6 +20,8 @@
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 //   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
 //   POST   /api/orgs               -> alta de una org + su admin (SOLO super-admins de Maze)
+//   DELETE /api/orgs/{orgId}       -> elimina una org completa (datos + perfiles, JAMÁS auth users; SOLO super-admins)
+//   POST   /api/orgs/{orgId}/members/{uid}/login-link -> magic link para entrar como ese miembro (SOLO super-admins)
 //   GET    /api/platform/settings  -> estado del token de agencia GHL (solo hint, SOLO super-admins)
 //   POST   /api/platform/settings  -> guarda/borra el token de agencia GHL, validado en vivo (SOLO super-admins)
 //   GET    /api/platform/locations -> busca subcuentas de la agencia GHL por nombre/email/id (SOLO super-admins)
@@ -2089,6 +2091,137 @@ async function addOrgAdmin(req, res, sa, orgId) {
   return sendJSON(res, 200, out);
 }
 
+// ---------- DELETE /api/orgs/{orgId} ----------
+// Elimina una organización COMPLETA: ventas, entradas, metas, integraciones y
+// perfiles, y al final la org misma. SOLO super-admins. Borrado explícito tabla
+// por tabla (aunque el schema tenga ON DELETE CASCADE) para contar filas y no
+// depender del cascade.
+//
+// PROHIBIDO tocar auth.users / /auth/v1/admin/users acá: GoTrue es COMPARTIDO
+// con otras apps de Maze — borrar el auth user rompería sus otras cuentas. Sin
+// perfil en st_profiles el usuario ya no puede entrar al tracker (checkUserToken
+// + requireMember lo bloquean), así que borrar el perfil alcanza.
+async function deleteOrg(req, res, sa, orgId) {
+  // La org tiene que existir (y de paso obtenemos el nombre para el log NO —
+  // solo el id: nombres de orgs tampoco van a logs).
+  let orgRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=id,name',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudo leer la organización' });
+    orgRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer la organización' });
+  }
+  if (!Array.isArray(orgRows) || !orgRows[0]) {
+    return sendJSON(res, 404, { error: 'Esa organización no existe' });
+  }
+
+  // Borrado explícito en orden: datos → perfiles → org. Cada DELETE filtra
+  // org_id=eq.{orgId} (anti cross-org) y pide return=representation para
+  // contar las filas eliminadas.
+  const pasos = [
+    { tabla: 'st_sales', query: 'org_id=eq.' + encodeURIComponent(orgId), clave: 'sales' },
+    { tabla: 'st_entries', query: 'org_id=eq.' + encodeURIComponent(orgId), clave: 'entries' },
+    { tabla: 'st_goals', query: 'org_id=eq.' + encodeURIComponent(orgId), clave: 'goals' },
+    { tabla: 'st_integrations', query: 'org_id=eq.' + encodeURIComponent(orgId), clave: 'integrations' },
+    { tabla: 'st_profiles', query: 'org_id=eq.' + encodeURIComponent(orgId), clave: 'profiles' },
+    { tabla: 'st_orgs', query: 'id=eq.' + encodeURIComponent(orgId), clave: 'orgs' },
+  ];
+  const deleted = {};
+  for (const paso of pasos) {
+    let r;
+    try {
+      r = await fetch(SUPABASE_URL + '/rest/v1/' + paso.tabla + '?' + paso.query, {
+        method: 'DELETE',
+        headers: svcHeaders({ 'Prefer': 'return=representation' }),
+      });
+    } catch {
+      console.error(`[api] DELETE /api/orgs/${orgId} super=${sa.email} fail tabla=${paso.tabla} (red) -> 500 parcial`);
+      return sendJSON(res, 500, { error: 'No se pudo completar la eliminación: falló al borrar ' + paso.tabla + ' y la organización quedó eliminada parcialmente. Volvé a intentar para terminar de borrarla.' });
+    }
+    if (r.status < 200 || r.status >= 300) {
+      console.error(`[api] DELETE /api/orgs/${orgId} super=${sa.email} fail tabla=${paso.tabla} status=${r.status} -> 500 parcial`);
+      return sendJSON(res, 500, { error: 'No se pudo completar la eliminación: falló al borrar ' + paso.tabla + ' y la organización quedó eliminada parcialmente. Volvé a intentar para terminar de borrarla.' });
+    }
+    const rows = await r.json().catch(() => null);
+    deleted[paso.clave] = Array.isArray(rows) ? rows.length : 0;
+  }
+
+  console.log(`[api] DELETE /api/orgs/${orgId} super=${sa.email} deleted profiles=${deleted.profiles} sales=${deleted.sales} entries=${deleted.entries} -> 200`);
+  return sendJSON(res, 200, { ok: true, deleted: { profiles: deleted.profiles, sales: deleted.sales, entries: deleted.entries } });
+}
+
+// ---------- POST /api/orgs/{orgId}/members/{uid}/login-link ----------
+// Genera un magic link de GoTrue para entrar a la app COMO ese miembro
+// (impersonación de soporte). SOLO super-admins. El link/token/email JAMÁS
+// se loggean: solo orgId + uid + super-admin (repudiation trail sin secretos).
+async function memberLoginLink(req, res, sa, orgId, uid) {
+  if (!PUBLIC_URL) {
+    return sendJSON(res, 503, { error: 'PUBLIC_URL no está configurada en el servidor' });
+  }
+
+  // Pertenencia: el uid tiene que ser un perfil de ESA org (anti cross-org).
+  let profRows;
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid)
+        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,active',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudo leer el perfil del miembro' });
+    profRows = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo leer el perfil del miembro' });
+  }
+  const prof = Array.isArray(profRows) ? profRows[0] : null;
+  if (!prof) {
+    return sendJSON(res, 404, { error: 'Ese miembro no pertenece a esa organización' });
+  }
+  if (prof.active === false) {
+    return sendJSON(res, 400, { error: 'Ese miembro está inactivo' });
+  }
+
+  const email = await getAuthEmail(uid, new Map());
+  if (!email) {
+    return sendJSON(res, 404, { error: 'No se encontró el email de ese miembro' });
+  }
+
+  // Magic link vía GoTrue admin. JAMÁS loggear link/token/email de acá en más.
+  let data;
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/admin/generate_link', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: JSON.stringify({ type: 'magiclink', email, redirect_to: PUBLIC_URL }),
+    });
+    if (r.status < 200 || r.status >= 300) {
+      return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+    }
+    data = await r.json().catch(() => null);
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+  }
+
+  // GoTrue devuelve action_link/hashed_token al tope o anidados en .properties.
+  const props = (data && data.properties) || {};
+  const actionLink = (data && data.action_link) || props.action_link || '';
+  const hashedToken = (data && data.hashed_token) || props.hashed_token || '';
+  let link = actionLink;
+  if (!link && hashedToken) {
+    link = SUPABASE_URL + '/auth/v1/verify?token=' + encodeURIComponent(hashedToken)
+      + '&type=magiclink&redirect_to=' + encodeURIComponent(PUBLIC_URL);
+  }
+  if (!link) {
+    return sendJSON(res, 502, { error: 'No se pudo generar el acceso' });
+  }
+
+  console.log(`[api] POST /api/orgs/${orgId}/members/${uid}/login-link super=${sa.email} -> 200`);
+  return sendJSON(res, 200, { link });
+}
+
 // ---------- GET /api/platform/settings ----------
 // Estado del token de agencia GHL para la vista Plataforma. SOLO super-admins.
 // El token completo JAMÁS sale en la respuesta ni en logs: solo un hint
@@ -2324,6 +2457,15 @@ const server = http.createServer(async (req, res) => {
       return listOrgMembers(req, res, sa, decodeURIComponent(orgMembersMatch[1]));
     }
 
+    // Impersonación: se evalúa ANTES que orgMemberMatch (aunque su regex
+    // /members\/([^/]+)$/ no matchea /login-link, el orden queda explícito).
+    const orgLoginLinkMatch = path.match(/^\/api\/orgs\/([^/]+)\/members\/([^/]+)\/login-link$/);
+    if (orgLoginLinkMatch && req.method === 'POST') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return memberLoginLink(req, res, sa, decodeURIComponent(orgLoginLinkMatch[1]), decodeURIComponent(orgLoginLinkMatch[2]));
+    }
+
     const orgMemberMatch = path.match(/^\/api\/orgs\/([^/]+)\/members\/([^/]+)$/);
     if (orgMemberMatch && req.method === 'PATCH') {
       const sa = await requireSuperAdmin(req);
@@ -2336,6 +2478,13 @@ const server = http.createServer(async (req, res) => {
       const sa = await requireSuperAdmin(req);
       if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
       return addOrgAdmin(req, res, sa, decodeURIComponent(orgAdminsMatch[1]));
+    }
+
+    const orgMatch = path.match(/^\/api\/orgs\/([^/]+)$/);
+    if (orgMatch && req.method === 'DELETE') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return deleteOrg(req, res, sa, decodeURIComponent(orgMatch[1]));
     }
 
     // Vista Plataforma: SOLO super-admins (mismo guard fail-closed que /api/orgs).
