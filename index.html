@@ -1661,6 +1661,10 @@ function orgPanelHtml(){
       const actBtn=(m.active!==false)
         ? `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Desactivar</button>`
         : `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Reactivar</button>`;
+      // "Entrar como": solo miembros activos (la API igual rechaza inactivos).
+      const loginBtn=(m.active!==false)
+        ? `<button class="btn ghost sm" onclick="loginAsMember(${idx})">Entrar como</button>`
+        : '';
       const badges=`${m.ghl?'<span class="tag ok">GHL</span>':'<span class="tag">Manual</span>'}${(m.active!==false)?'':' <span class="tag warn">Inactivo</span>'}`;
       return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">
         <span class="cbx-ava">${esc(locInitials(m.name))}</span>
@@ -1669,6 +1673,7 @@ function orgPanelHtml(){
           <div style="color:var(--muted);font-size:12.5px">${esc(m.email||'—')}</div>
         </div>
         ${roleSel}
+        ${loginBtn}
         ${actBtn}
       </div>`;
     }).join('');
@@ -1682,7 +1687,12 @@ function orgPanelHtml(){
     </div>
     <button class="btn sm" onclick="addOrgAdmin()" ${ADMIN_CREATING?'disabled':''}>${ADMIN_CREATING?'Agregando…':'Agregar admin'}</button>
   </div>`;
-  return `<div style="padding:10px 4px"><div class="eyebrow">Miembros</div>${list}${form}</div>`;
+  const danger=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:14px">
+    <b style="font-size:13px;display:block;margin:0 0 6px;color:var(--danger)">Zona de peligro</b>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 8px">Elimina la organización con todos sus datos y miembros. Irreversible.</p>
+    <button class="btn danger sm" onclick="openDeleteOrg()">Eliminar organización</button>
+  </div>`;
+  return `<div style="padding:10px 4px"><div class="eyebrow">Miembros</div>${list}${form}${danger}</div>`;
 }
 // PATCH genérico de un miembro del panel. Ante error (p.ej. 400 "sin admin")
 // NO se muta PLAT_MEMBERS: el re-render revierte el select/estado anterior.
@@ -1719,6 +1729,88 @@ window.toggleMemberActive=(idx)=>{
   const activar=m.active===false;
   if(!activar && !confirm('¿Desactivar a este miembro? No va a poder entrar.')) return;
   return patchPanelMember(idx,{active:activar},activar?'Miembro reactivado':'Miembro desactivado','No se pudo actualizar al miembro');
+};
+// ---------- Eliminar organización (SOLO super-admins) ----------
+// Modal lazy patrón pwOv: confirmación fuerte escribiendo el nombre EXACTO de
+// la org. La comparación se hace contra el valor crudo (referencia en DEL_ORG),
+// nunca contra el nombre renderizado en el DOM (que va escapado con esc()).
+let DEL_ORG=null;
+window.openDeleteOrg=()=>{
+  const org=(ORGS||[]).find(o=>o&&o.id===PLAT_M_ORG);
+  if(!org) return;
+  DEL_ORG=org;
+  let ov=document.getElementById('delOrgOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='delOrgOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeDeleteOrg(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:420px">
+    <button class="drill-x" onclick="closeDeleteOrg()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Zona de peligro</div><h3>Eliminar ${esc(org.name)}</h3></div></div>
+    <p class="drill-def">Esto es <b>irreversible</b>: se borran las ventas, entradas, metas, integraciones y miembros de la organización. Los usuarios no se borran de la autenticación, pero pierden el acceso al tracker.</p>
+    <div class="field"><label>Escribí el nombre exacto de la organización para confirmar</label>
+      <input class="inp" id="delOrgInput" autocomplete="off" oninput="delOrgCheck()"></div>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn ghost sm" type="button" onclick="closeDeleteOrg()">Cancelar</button>
+      <button class="btn danger sm" id="delOrgBtn" disabled onclick="confirmDeleteOrg()">Eliminar definitivamente</button>
+    </div>
+  </div>`;
+  ov.style.display='flex';
+  const inp=document.getElementById('delOrgInput'); if(inp) inp.focus();
+};
+window.closeDeleteOrg=()=>{ DEL_ORG=null; const ov=document.getElementById('delOrgOv'); if(ov) ov.style.display='none'; };
+window.delOrgCheck=()=>{
+  const inp=document.getElementById('delOrgInput'), btn=document.getElementById('delOrgBtn');
+  if(!inp||!btn||!DEL_ORG) return;
+  btn.disabled = inp.value !== DEL_ORG.name;
+};
+window.confirmDeleteOrg=async ()=>{
+  if(!DEL_ORG) return;
+  const inp=document.getElementById('delOrgInput');
+  if(!inp || inp.value!==DEL_ORG.name) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  const btn=document.getElementById('delOrgBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Eliminando…'; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(DEL_ORG.id),{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='Eliminar definitivamente'; }
+    toast('No se pudo conectar con el servidor');
+    return;
+  }
+  if(res.ok){
+    const d=data.deleted||{};
+    toast(`Organización eliminada: ${d.profiles||0} miembros, ${d.sales||0} ventas, ${d.entries||0} entradas`, 3200);
+    closeDeleteOrg();
+    PLAT_M_ORG=null; PLAT_MEMBERS=null;
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+    if(state.view==='platform') renderPlatform();
+  } else {
+    if(btn){ btn.disabled=false; btn.textContent='Eliminar definitivamente'; }
+    toast(data.error||'No se pudo eliminar la organización');
+  }
+};
+// ---------- Entrar como (impersonación de soporte) ----------
+// Pide un magic link a la API y navega directo: supabase-js pisa la sesión con
+// la del miembro al detectar el hash al volver (no hace falta signOut previo).
+// El link JAMÁS se muestra, se loggea ni va a un toast.
+window.loginAsMember=async (idx)=>{
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m||!PLAT_M_ORG) return;
+  if(!confirm('Vas a salir de tu sesión de super-admin y entrar como '+(m.name||m.email||'este miembro')+'. Para volver: cerrá sesión y logueate de nuevo.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/members/'+encodeURIComponent(m.id)+'/login-link',{method:'POST',headers:{'Authorization':'Bearer '+session.access_token}});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok && data.link){ window.location.href=data.link; }
+  else{ toast(data.error||'No se pudo generar el acceso'); }
 };
 window.addOrgAdmin=async ()=>{
   if(ADMIN_CREATING||!PLAT_M_ORG) return;
