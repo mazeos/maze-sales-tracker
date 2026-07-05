@@ -1923,7 +1923,8 @@ async function setPlatformSettings(req, res, sa) {
 // (la agencia cambia poco); el filtro `q` se aplica sobre el cache, así el
 // buscador con debounce no re-pagina GHL en cada tecla. Si una página responde
 // no-2xx, lanza Error (el caller responde 502). Filtro `q` (lowercase/trim)
-// contra name/email/id; q vacío = todas. Devuelve [{id,name,city,country}] —
+// contra name/email/id; q vacío = todas. Devuelve [{id,name,city,country}]
+// ordenado alfabéticamente por nombre (localeCompare 'es', case-insensitive) —
 // jamás el objeto crudo de GHL (email queda server-side, solo para filtrar).
 let agencyLocationsCache = { at: 0, data: null };
 async function searchAgencyLocations(pit, q) {
@@ -1957,6 +1958,13 @@ async function searchAgencyLocations(pit, q) {
       ))
     : acc.filter((l) => l && l.id);
 
+  // Orden alfabético por nombre (es, case-insensitive). Es seguro ordenar
+  // `filtered` in-place: .filter() ya devolvió un array nuevo, el cache
+  // compartido (agencyLocationsCache.data) no se muta.
+  filtered.sort((a, b) =>
+    String(a.name || a.id).localeCompare(String(b.name || b.id), 'es', { sensitivity: 'base' })
+  );
+
   return filtered.map((l) => ({
     id: l.id,
     name: l.name || l.id,
@@ -1968,7 +1976,8 @@ async function searchAgencyLocations(pit, q) {
 // ---------- GET /api/platform/locations?q= ----------
 // Buscador de subcuentas de la agencia para el alta de orgs. SOLO super-admins.
 // Anota `linked_org`: si la location ya está vinculada a una org del tracker,
-// el nombre de esa org (para deshabilitarla en la UI). Máximo 20 resultados.
+// el nombre de esa org (para deshabilitarla en la UI). Máximo 50 resultados;
+// `total` = cantidad post-filtro pre-cap (para el header "Mostrando X de Y").
 async function listAgencyLocations(req, res, sa, url) {
   const pit = await getPlatformSetting(PIT_KEY);
   if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
@@ -2000,12 +2009,13 @@ async function listAgencyLocations(req, res, sa, url) {
     }
   } catch { /* best-effort: sin la anotación el buscador sigue sirviendo */ }
 
-  const out = locations.slice(0, 20).map((l) => ({
+  const total = locations.length;
+  const out = locations.slice(0, 50).map((l) => ({
     ...l,
     linked_org: linkedByLocation.get(l.id) || null,
   }));
-  console.log(`[api] GET /api/platform/locations super=${sa.email} n=${out.length} -> 200`);
-  return sendJSON(res, 200, { locations: out });
+  console.log(`[api] GET /api/platform/locations super=${sa.email} n=${out.length} total=${total} -> 200`);
+  return sendJSON(res, 200, { locations: out, total });
 }
 
 // ---------- Router ----------
