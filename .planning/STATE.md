@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-05 - Completed quick task 260705-020: combobox de subcuentas
+Last activity: 2026-07-05 - Completed quick task 260705-14a: gestión de permisos por org
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -72,6 +72,7 @@ None yet.
 | 260704-vqc | Panel super-admin de Organizaciones (alta de tenants) | 2026-07-04 | (merge) | [260704-vqc-panel-super-admin-de-organizaciones-alta](./quick/260704-vqc-panel-super-admin-de-organizaciones-alta/) |
 | 260704-wmy | Vista Plataforma super-admin — API de agencia + alta con subcuenta pre-vinculada | 2026-07-04 | (merge) | [260704-wmy-vista-plataforma-super-admin-api-de-agen](./quick/260704-wmy-vista-plataforma-super-admin-api-de-agen/) |
 | 260705-020 | Combobox cómodo para el buscador de subcuentas en Plataforma | 2026-07-05 | (merge) | [260705-020-combobox-c-modo-para-el-buscador-de-subc](./quick/260705-020-combobox-c-modo-para-el-buscador-de-subc/) |
+| 260705-14a | Gestión de miembros y permisos por org desde Plataforma | 2026-07-05 | (merge) | [260705-14a-gesti-n-de-miembros-y-permisos-por-org-d](./quick/260705-14a-gesti-n-de-miembros-y-permisos-por-org-d/) |
 
 ## Deferred Items
 
