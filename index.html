@@ -1142,7 +1142,12 @@ window.importGhlUser=async (ghlUserId)=>{
     data=await res.json().catch(()=>({}));
   }catch(e){ toast('No se pudo conectar con el servidor'); return; }
   if(res.ok){
-    toast(data.reactivated?'Reactivado':(data.linked?'Vinculado':'Importado'));
+    if(data.existing_account){
+      // Ya tenía cuenta en el auth compartido: NO entra con el código de acceso.
+      toast('Importado. Ojo: ya tenía cuenta, entra con su contraseña de siempre (no con el código de acceso)', 7000);
+    } else {
+      toast(data.reactivated?'Reactivado':(data.linked?'Vinculado':'Importado'));
+    }
     await loadFromSupabase();   // refresca el equipo local
     await loadGhlUsers();       // refresca los estados de la tabla
   } else {
@@ -1228,6 +1233,21 @@ function renderTeam(){
     </div>`;
   });
   if(!DB.members.length) list=`<div class="empty">Sin miembros todavía.</div>`;
+  // Alta manual: solo sin GHL conectado. Con conexión, el equipo se sincroniza
+  // 100% desde HighLevel (decisión 2026-07-04). La baja manual (Quitar) queda siempre.
+  const addMemberForm=`<div class="section"><div class="eyebrow">Agregar miembro</div>
+      <div class="grid2">
+        <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
+        <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
+        <div class="field"><label>Email</label><input class="inp" id="newEmail" type="email" placeholder="persona@email.com"></div>
+        <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
+      </div>
+      <button class="btn" onclick="addMember()">Agregar al equipo</button>
+    </div>`;
+  const addMemberHint=`<div class="section"><div class="eyebrow">Agregar miembro</div>
+      <p style="color:var(--muted);font-size:13px;margin:0">El equipo se sincroniza desde HighLevel. Importá miembros desde "Equipo desde HighLevel".</p>
+    </div>`;
+  const addMemberBox = !IS_ADMIN ? '' : ((GHL_STATUS && GHL_STATUS.connected) ? addMemberHint : addMemberForm);
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
     ${adminNotice()}
     <div class="section"><div class="eyebrow">Agencia</div>
@@ -1238,15 +1258,7 @@ function renderTeam(){
       </div>
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
-    ${IS_ADMIN ? `<div class="section"><div class="eyebrow">Agregar miembro</div>
-      <div class="grid2">
-        <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
-        <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
-        <div class="field"><label>Email</label><input class="inp" id="newEmail" type="email" placeholder="persona@email.com"></div>
-        <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
-      </div>
-      <button class="btn" onclick="addMember()">Agregar al equipo</button>
-    </div>` : ''}
+    ${addMemberBox}
     ${ghlCard()}${ghlTeamCard()}` + footer();
 }
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
@@ -1364,7 +1376,7 @@ function footer(){ return `<div class="footnote">
   <span>Datos guardados en este navegador</span><span class="dot2"></span>
   <a href="https://github.com/mazeos/maze-sales-tracker" target="_blank" rel="noopener">repo</a></div>`; }
 let toastT;
-function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
+function toast(msg,ms){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),ms||1800); }
 window.toast=toast;
 
 // ---------- tema claro/oscuro ----------
