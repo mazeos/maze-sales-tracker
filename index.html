@@ -1020,6 +1020,10 @@ function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=su
 // ---------- Integración HighLevel ----------
 // Estado de la conexión GHL de la org (null = todavía no se consultó a la API).
 let GHL_STATUS=null, GHL_LOADING=false;
+// Calendarios elegibles para "Calendario de llamadas" (null = todavía no se
+// consultó; objeto = respuesta del GET {calendars, selected, selected_name, hint?}
+// o {error:true, msg} si falló).
+let GHL_CALS=null, GHL_CALS_LOADING=false;
 async function loadGhlStatus(){
   if(!IS_ADMIN || GHL_LOADING) return;
   GHL_LOADING=true;
@@ -1032,6 +1036,42 @@ async function loadGhlStatus(){
   }catch(e){ GHL_STATUS={connected:false,error:true}; }
   finally{ GHL_LOADING=false; if(state.view==='team') renderTeam(); }
 }
+// Carga lazy de los calendarios elegibles (mismo patrón que loadGhlStatus).
+async function loadGhlCalendars(){
+  if(!IS_ADMIN || GHL_CALS_LOADING) return;
+  GHL_CALS_LOADING=true;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ GHL_CALS={error:true,msg:''}; return; }
+    const res=await fetch('/api/ghl/calendars',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>null);
+    GHL_CALS=(res.ok && data) ? data : {error:true, msg:(data&&data.error)||''};
+  }catch(e){ GHL_CALS={error:true,msg:''}; }
+  finally{ GHL_CALS_LOADING=false; if(state.view==='team') renderTeam(); }
+}
+// Sub-bloque "Calendario de llamadas" de la card conectada (solo admin).
+function ghlCalendarBlock(){
+  let inner='';
+  if(GHL_CALS===null){
+    loadGhlCalendars();
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando calendarios…</p>`;
+  } else if(GHL_CALS.error){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.msg||'No se pudieron cargar los calendarios. Recargá la página para reintentar.')}</p>`;
+  } else if(!(GHL_CALS.calendars||[]).length){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.hint||'Importá primero a tus closers desde Equipo desde HighLevel')}</p>`;
+  } else {
+    const opts=['<option value="">— Sin configurar —</option>']
+      .concat(GHL_CALS.calendars.map(c=>`<option value="${esc(c.id)}" ${GHL_CALS.selected===c.id?'selected':''}>${esc(c.name)}${(c.closers&&c.closers.length)?' · '+esc(c.closers.join(', ')):''}</option>`))
+      .join('');
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0 0 8px">De acá salen los leads con cita para asociar ventas.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="ghl-cal-select" class="chip">${opts}</select>
+        <button class="btn sm" onclick="saveGhlCalendar()">Guardar</button>
+      </div>`;
+  }
+  return `<div style="border-top:1px solid var(--line);padding-top:12px;margin:0 0 12px">
+    <b style="font-size:13px;display:block;margin:0 0 6px">Calendario de llamadas</b>${inner}</div>`;
+}
 function ghlCard(){
   if(!IS_ADMIN) return '';
   let body='';
@@ -1043,6 +1083,7 @@ function ghlCard(){
   } else if(GHL_STATUS.connected){
     const fecha=GHL_STATUS.connected_at ? new Date(GHL_STATUS.connected_at).toLocaleDateString('es-AR',{day:'numeric',month:'short',year:'numeric'}) : '';
     body=`<p style="font-size:13.5px;margin:0 0 12px">✅ Conectado a <b>${esc(GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta')}</b>${fecha?` <span style="color:var(--muted)">· desde el ${fecha}</span>`:''}</p>
+      ${ghlCalendarBlock()}
       <button class="btn danger sm" onclick="disconnectGhl()">Desconectar</button>`;
   } else {
     body=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Conectá tu subcuenta de HighLevel para que el tracker cargue actividad automáticamente. Sin conexión, la carga manual sigue funcionando igual.</p>
@@ -1066,8 +1107,31 @@ window.disconnectGhl=async ()=>{
     res=await fetch('/api/integrations/ghl',{method:'DELETE',headers:{'Authorization':'Bearer '+session.access_token}});
     data=await res.json().catch(()=>({}));
   }catch(e){ toast('No se pudo conectar con el servidor'); return; }
-  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; renderTeam(); }
+  if(res.ok){ toast('HighLevel desconectado'); GHL_STATUS={connected:false}; GHL_CALS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; renderTeam(); }
   else{ toast(data.error || 'No se pudo desconectar'); }
+};
+window.saveGhlCalendar=async ()=>{
+  if(!IS_ADMIN) return;
+  const sel=document.getElementById('ghl-cal-select');
+  const valor=sel?sel.value:'';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/integrations/ghl/calendar',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+session.access_token,'Content-Type':'application/json'},
+      body:JSON.stringify({calendar_id: valor || null}),
+    });
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    if(GHL_CALS && !GHL_CALS.error){ GHL_CALS.selected=valor||null; GHL_CALS.selected_name=data.calendar_name||null; }
+    toast(valor ? 'Calendario guardado' : 'Calendario sin configurar');
+    renderTeam();
+  } else {
+    toast(data.error || 'No se pudo guardar el calendario');
+  }
 };
 
 // ---------- Equipo desde HighLevel (Fase 2) ----------
