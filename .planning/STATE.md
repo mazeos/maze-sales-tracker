@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-04 - Completed quick task 260704-tu4: Fase 2.2 — reconciliación total 100% GHL
+Last activity: 2026-07-04 - Completed quick task 260704-u3n: portar mejoras de Clara al producto
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -67,6 +67,7 @@ None yet.
 | 260704-r0e | Fase 2 carcasa GHL — Usuarios desde HighLevel (import + código de acceso + sync) | 2026-07-04 | (merge) | [260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle](./quick/260704-r0e-fase-2-carcasa-ghl-usuarios-desde-highle/) |
 | 260704-tiv | Fase 2.1 carcasa GHL — equipo 100% sincronizado + fix import email preexistente | 2026-07-04 | (merge) | [260704-tiv-fase-2-1-carcasa-ghl-equipo-100-sincroni](./quick/260704-tiv-fase-2-1-carcasa-ghl-equipo-100-sincroni/) |
 | 260704-tu4 | Fase 2.2 carcasa GHL — reconciliación total (auto-vincular + baja de huérfanos) | 2026-07-04 | (merge) | [260704-tu4-fase-2-2-carcasa-ghl-reconciliaci-n-tota](./quick/260704-tu4-fase-2-2-carcasa-ghl-reconciliaci-n-tota/) |
+| 260704-u3n | Portar mejoras de la instancia de Clara (Ventas GHL, dblclick, rail, a11y) | 2026-07-04 | (merge) | [260704-u3n-portar-mejoras-de-la-instancia-de-clara-](./quick/260704-u3n-portar-mejoras-de-la-instancia-de-clara-/) |
 
 ## Deferred Items
 
