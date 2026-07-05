@@ -2187,6 +2187,21 @@ async function refreshCuotas(){
 }
 function moneyFull(n){ return '$'+(+n||0).toLocaleString('es'); }
 function cuotaEstado(c){ if(c.status==='pagada') return 'pagada'; return c.due_date<todayStr()?'vencida':'pendiente'; }
+// Solo con la base 'cobrado': desglose de comisiones por closer del período visible.
+function comisionesBlock(r){
+  if((DB.team.commission_base||'contador')!=='cobrado') return '';
+  const closers=membersByRole('closer').filter(m=>(+m.commission||0)>0);
+  if(!closers.length) return '';
+  let rows='';
+  closers.forEach(m=>{
+    const b=closerPayoutBase(m.id, r.start, r.end);
+    rows+=`<tr><td style="text-align:left">${esc(m.name)}</td><td>${moneyFull(b.front)}</td><td>${moneyFull(b.back)}</td><td>${m.commission}%</td><td><b>${moneyFull(Math.round(m.commission/100*b.base))}</b></td></tr>`;
+  });
+  return `<div class="section"><div class="eyebrow">Comisiones del período ${info('Base "cobrado": front (cash+reservas de sus ventas) + back (cuotas cobradas, por fecha de cobro) × su % de comisión.')}</div>
+    <div class="rollup"><table>
+      <thead><tr><th style="text-align:left">Closer</th><th>Front</th><th>Back</th><th>%</th><th>A cobrar</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+}
 function renderCaja(){
   const cuotas=DB.cuotas||[];
   const r=range(state.ptype, parseD(state.ref));
@@ -2234,6 +2249,7 @@ function renderCaja(){
     </div>
     <div class="section"><div class="eyebrow">Proyección de cobros ${info('Lo que debería entrar según las cuotas agendadas, mes por mes.')}</div>
       <div class="cards-mini">${proj}</div></div>
+    ${comisionesBlock(r)}
     <div class="section"><div class="eyebrow">Cuotas</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
         ${filtros}
