@@ -2574,6 +2574,8 @@ async function boot(){
       const data=await res.json().catch(()=>null);
       if(!data) return;
       IS_SUPER=true; PLAT_SETTINGS=data;
+      // Super-admin = permisos totales en cualquier equipo (la RLS lo respalda vía st_is_super()).
+      if(!IS_ADMIN){ IS_ADMIN=true; render(); }
       const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
     })
     .catch(()=>{ /* fail-closed: el ítem queda oculto */ });

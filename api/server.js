@@ -207,7 +207,17 @@ async function checkAdminToken(bearerToken) {
   try { prof = await resolveActiveProfile(usr.uid); } catch {
     return { ok: false, status: 502, error: 'No se pudo leer el perfil del usuario' };
   }
-  if (!prof || prof.role !== 'admin') {
+  // Super-admins (SUPER_ADMIN_EMAILS): permisos de admin en CUALQUIER org,
+  // sin importar el rol de su membresía activa.
+  let isSuper = false;
+  if (prof && prof.role !== 'admin' && SUPER_ADMINS.length) {
+    try {
+      const uRes = await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(usr.uid), { headers: svcHeaders() });
+      const u = uRes.status === 200 ? await uRes.json().catch(() => null) : null;
+      isSuper = !!(u && u.email && SUPER_ADMINS.includes(String(u.email).toLowerCase()));
+    } catch { /* fail-closed */ }
+  }
+  if (!prof || (prof.role !== 'admin' && !isSuper)) {
     return { ok: false, status: 403, error: 'Solo el admin puede gestionar miembros' };
   }
 
