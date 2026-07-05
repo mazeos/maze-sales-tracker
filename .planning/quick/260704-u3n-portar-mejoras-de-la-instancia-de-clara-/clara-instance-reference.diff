@@ -1,0 +1,651 @@
+diff --git a/api/server.js b/api/server.js
+index 4e582cd..5dc92f8 100644
+--- a/api/server.js
++++ b/api/server.js
+@@ -22,6 +22,31 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !ANON_KEY) {
+ 
+ const VALID_ROLES = ['setter', 'triage', 'closer'];
+ 
++// ---------- Integración GHL + Slack (instancia Camino Digital) ----------
++// Si estos envs no están, las rutas /api/ghl/* y /api/sales/ghl devuelven 501.
++const GHL_PIT = process.env.GHL_PIT || '';
++const GHL_LOCATION = process.env.GHL_LOCATION || '';
++const GHL_CALENDAR = process.env.GHL_CALENDAR || '';
++const SLACK_TOKEN = process.env.SLACK_TOKEN || '';
++const SLACK_WINS_CHANNEL = process.env.SLACK_WINS_CHANNEL || '';
++const GHL_BASE = 'https://services.leadconnectorhq.com';
++
++// IDs de custom fields del contacto GHL (subcuenta Camino Digital) para el onboarding.
++const GHL_CF = {
++  montoTotal: '3ydYygncRnvwpT1bFadV',      // Monto total del contrato
++  cantidadPagos: 'p4JMHWMKfpI6CQiFcBBN',   // Cantidad de pagos
++  metodoPago: '86BfCnJhBhNPG0lHMIu5',      // Método de pago
++  programa: 'xcbCFG6iDHAlBYDfu8e2',        // Nombre del programa
++  montoReserva: 'RO89ClhLcL2qEBR4QsXi',    // Monto de la reserva
++  fueReserva: 'o8fXypzhJALVBBfq52UA',      // ¿Fue una reserva?
++  primerPago: 'oti3u42eWnX0cDppJzHO',      // Monto del primer pago
++  vendedor: 'Ppg3ITdJxPPrGUcaYeAF',        // Nombre del vendedor
++};
++
++function ghlHeaders(version = '2021-07-28') {
++  return { 'Authorization': 'Bearer ' + GHL_PIT, 'Version': version, 'Content-Type': 'application/json' };
++}
++
+ // ---------- Helpers de respuesta ----------
+ function sendJSON(res, status, obj) {
+   const body = JSON.stringify(obj);
+@@ -109,6 +134,166 @@ async function requireAdmin(req) {
+   return { ok: true, uid, org_id: prof.org_id };
+ }
+ 
++// ---------- Auth: cualquier miembro activo del equipo (no solo admin) ----------
++async function requireMember(req) {
++  const authHeader = req.headers['authorization'] || '';
++  if (!authHeader.toLowerCase().startsWith('bearer ')) {
++    return { ok: false, status: 401, error: 'Falta el token de sesión' };
++  }
++  let userRes;
++  try {
++    userRes = await fetch(SUPABASE_URL + '/auth/v1/user', {
++      headers: { 'apikey': ANON_KEY, 'Authorization': authHeader },
++    });
++  } catch {
++    return { ok: false, status: 502, error: 'No se pudo validar la sesión' };
++  }
++  if (userRes.status !== 200) return { ok: false, status: 401, error: 'Sesión inválida' };
++  const user = await userRes.json();
++  if (!user || !user.id) return { ok: false, status: 401, error: 'Sesión inválida' };
++  let profRes, profs;
++  try {
++    profRes = await fetch(
++      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(user.id) + '&select=org_id,role,name,active',
++      { headers: svcHeaders() }
++    );
++    profs = await profRes.json().catch(() => null);
++  } catch {
++    return { ok: false, status: 502, error: 'No se pudo leer el perfil' };
++  }
++  const prof = Array.isArray(profs) ? profs[0] : null;
++  if (!prof || prof.active === false) return { ok: false, status: 403, error: 'Tu usuario no está activo en el equipo' };
++  return { ok: true, uid: user.id, org_id: prof.org_id, role: prof.role, name: prof.name };
++}
++
++// ---------- GET /api/ghl/leads ----------
++// Leads con cita en el calendario de admisión (últimos 14 días + próximos 7) para asociar la venta.
++// Cache simple en memoria (60s) para no golpear GHL en cada render.
++let leadsCache = { at: 0, data: null };
++async function ghlLeads(req, res) {
++  if (!GHL_PIT || !GHL_CALENDAR) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
++  const now = Date.now();
++  if (leadsCache.data && now - leadsCache.at < 60000) return sendJSON(res, 200, { leads: leadsCache.data, cached: true });
++  let events = [];
++  try {
++    const start = now - 14 * 86400000, end = now + 7 * 86400000;
++    const evRes = await fetch(
++      `${GHL_BASE}/calendars/events?locationId=${GHL_LOCATION}&calendarId=${GHL_CALENDAR}&startTime=${start}&endTime=${end}`,
++      { headers: ghlHeaders('2021-04-15') }
++    );
++    const ev = await evRes.json().catch(() => ({}));
++    events = ev.events || [];
++  } catch {
++    return sendJSON(res, 502, { error: 'No se pudieron leer las citas de GHL' });
++  }
++  // dedupe por contacto, quedarse con la cita más reciente
++  const byContact = new Map();
++  for (const e of events) {
++    if (!e.contactId) continue;
++    const st = String(e.appointmentStatus || '').toLowerCase();
++    if (['cancelled', 'invalid'].includes(st)) continue;
++    const prev = byContact.get(e.contactId);
++    if (!prev || String(e.startTime) > String(prev.startTime)) byContact.set(e.contactId, e);
++  }
++  const leads = [];
++  for (const [cid, e] of byContact) {
++    try {
++      const cRes = await fetch(`${GHL_BASE}/contacts/${cid}`, { headers: ghlHeaders() });
++      const c = (await cRes.json().catch(() => ({}))).contact || {};
++      leads.push({
++        id: cid,
++        name: (()=>{ const w=[c.firstName, c.lastName].filter(Boolean).join(' ').split(/\s+/); return w.filter((x,i)=>i===0||x.toLowerCase()!==w[i-1].toLowerCase()).join(' ') || c.email || 'Sin nombre'; })(),
++        email: c.email || '', phone: c.phone || '',
++        cita: e.startTime || '', estado: e.appointmentStatus || '',
++      });
++    } catch { /* contacto ilegible: lo salteamos */ }
++  }
++  leads.sort((a, b) => String(b.cita).localeCompare(String(a.cita)));
++  leadsCache = { at: now, data: leads };
++  return sendJSON(res, 200, { leads });
++}
++
++// ---------- POST /api/sales/ghl ----------
++// Cierra el ciclo de la venta en GHL: custom fields de onboarding + tag disparador + aviso a Slack.
++async function salesGhl(req, res, member) {
++  if (!GHL_PIT) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
++  const parsed = await readJSONBody(req);
++  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
++  const b = parsed.data || {};
++  const contactId = typeof b.contactId === 'string' ? b.contactId.trim() : '';
++  if (!contactId) return sendJSON(res, 400, { error: 'Falta el contacto de GHL' });
++
++  const fueReserva = !!b.fueReserva;
++  const result = { customFields: false, tag: false, opportunity: false, slack: false };
++
++  // a. Custom fields de onboarding en el contacto
++  const cf = [];
++  const push = (id, v) => { if (v !== undefined && v !== null && String(v).trim() !== '') cf.push({ id, value: String(v) }); };
++  push(GHL_CF.montoTotal, b.facturado);
++  push(GHL_CF.cantidadPagos, b.cuotas);
++  push(GHL_CF.metodoPago, b.metodo);
++  push(GHL_CF.programa, b.programa);
++  push(GHL_CF.primerPago, b.primerPago);
++  push(GHL_CF.vendedor, b.vendedor || member.name);
++  push(GHL_CF.fueReserva, fueReserva ? 'Si' : 'No');
++  if (fueReserva) push(GHL_CF.montoReserva, b.reserva);
++  try {
++    const upRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}`, {
++      method: 'PUT', headers: ghlHeaders(), body: JSON.stringify({ customFields: cf }),
++    });
++    result.customFields = upRes.status >= 200 && upRes.status < 300;
++  } catch { /* best-effort, se reporta en result */ }
++
++  // b. Tag disparador del onboarding (venta-cerrada) o del seguimiento de seña (reserva)
++  const tag = fueReserva ? 'reserva' : 'venta-cerrada';
++  try {
++    const tagRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/tags`, {
++      method: 'POST', headers: ghlHeaders(), body: JSON.stringify({ tags: [tag] }),
++    });
++    result.tag = tagRes.status >= 200 && tagRes.status < 300;
++  } catch { /* idem */ }
++
++  // c. Oportunidad en el pipeline "03. Onboarding": Reservaron (seña) o Pago realizado (venta)
++  const PIPE_ONBOARDING = 'QFrdanHs6rF7DrlKn6NF';
++  const STAGE_RESERVARON = '36247118-bb6c-491e-ac96-01403399a210';
++  const STAGE_PAGO = '8981ba62-578a-4bc3-be81-bea7a88ee06a';
++  try {
++    const oppRes = await fetch(`${GHL_BASE}/opportunities/`, {
++      method: 'POST', headers: ghlHeaders(),
++      body: JSON.stringify({
++        locationId: GHL_LOCATION,
++        pipelineId: PIPE_ONBOARDING,
++        pipelineStageId: fueReserva ? STAGE_RESERVARON : STAGE_PAGO,
++        contactId,
++        name: `${b.clienteNombre || 'Cliente'} — ${b.programa || 'Programa'}`,
++        status: 'open',
++        monetaryValue: +b.facturado || 0,
++      }),
++    });
++    result.opportunity = oppRes.status >= 200 && oppRes.status < 300;
++  } catch { /* best-effort */ }
++
++  // d. Aviso a Slack (best-effort)
++  if (SLACK_TOKEN && SLACK_WINS_CHANNEL) {
++    try {
++      const emoji = fueReserva ? ':lock:' : ':tada:';
++      const tipo = fueReserva ? 'Reserva (seña)' : 'Venta cerrada';
++      const monto = fueReserva ? (b.reserva || 0) : (b.cash || 0);
++      const txt = `${emoji} *${tipo}:* ${b.clienteNombre || 'Cliente'} — *$${monto}* cash · ${b.programa || 's/programa'} · closer: ${b.vendedor || member.name}\n<https://app.mazefunnels.com/v2/location/${GHL_LOCATION}/contacts/detail/${contactId}|Abrir contacto en GHL>`;
++      const sRes = await fetch('https://slack.com/api/chat.postMessage', {
++        method: 'POST',
++        headers: { 'Authorization': 'Bearer ' + SLACK_TOKEN, 'Content-Type': 'application/json' },
++        body: JSON.stringify({ channel: SLACK_WINS_CHANNEL, text: txt, unfurl_links: false }),
++      });
++      const sJson = await sRes.json().catch(() => ({}));
++      result.slack = !!sJson.ok;
++    } catch { /* idem */ }
++  }
++
++  console.log(`[api] POST /api/sales/ghl member=${member.uid} contact=${contactId} tag=${tag} cf=${result.customFields} slack=${result.slack}`);
++  return sendJSON(res, 200, { ok: true, tag, ...result });
++}
++
+ // ---------- POST /api/members ----------
+ async function createMember(req, res, admin) {
+   const parsed = await readJSONBody(req);
+@@ -240,6 +425,18 @@ const server = http.createServer(async (req, res) => {
+       return sendJSON(res, 200, { ok: true });
+     }
+ 
++    // Rutas GHL: cualquier miembro activo del equipo.
++    if (req.method === 'GET' && path === '/api/ghl/leads') {
++      const member = await requireMember(req);
++      if (!member.ok) return sendJSON(res, member.status, { error: member.error });
++      return ghlLeads(req, res);
++    }
++    if (req.method === 'POST' && path === '/api/sales/ghl') {
++      const member = await requireMember(req);
++      if (!member.ok) return sendJSON(res, member.status, { error: member.error });
++      return salesGhl(req, res, member);
++    }
++
+     // Todo lo demás bajo /api/members exige admin.
+     const isMembersRoot = path === '/api/members';
+     const memberIdMatch = path.match(/^\/api\/members\/([^/]+)$/);
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 087ed28..21f4c91 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1,23 +1,20 @@
+ services:
+-  maze-sales-tracker:
++  clara-sales-tracker:
+     image: nginx:alpine
+     restart: unless-stopped
+     volumes:
+-      # Servimos SOLO el index.html (no exponemos .git, .planning, README, etc.)
+       - ./index.html:/usr/share/nginx/html/index.html:ro
+       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+     networks:
+-      # traefik-public: expuesta al reverse-proxy. default: red interna para hablar con `api`.
+       - traefik-public
+       - default
+     labels:
+       - traefik.enable=true
+-      - traefik.http.routers.maze-sales-tracker.rule=Host(`sales-tracker.mazefunnels.io`)
+-      - traefik.http.routers.maze-sales-tracker.entrypoints=websecure
+-      - traefik.http.routers.maze-sales-tracker.tls.certresolver=letsencrypt
+-      - traefik.http.services.maze-sales-tracker.loadbalancer.server.port=80
++      - traefik.http.routers.clara-sales-tracker.rule=Host(`tracker.caminodigitalllc.com`)
++      - traefik.http.routers.clara-sales-tracker.entrypoints=websecure
++      - traefik.http.routers.clara-sales-tracker.tls.certresolver=letsencrypt
++      - traefik.http.services.clara-sales-tracker.loadbalancer.server.port=80
+ 
+-  # Mini-API de provisioning de miembros. Interna: solo la alcanza nginx por DNS (`api`).
+   api:
+     build: ./api
+     restart: unless-stopped
+diff --git a/index.html b/index.html
+index e35ff14..2f25261 100644
+--- a/index.html
++++ b/index.html
+@@ -3,7 +3,7 @@
+ <head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+-<title>Maze Sales Tracker IA</title>
++<title>Camino Digital — Sales Tracker</title>
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+@@ -11,7 +11,7 @@
+   :root{
+     --onyx:#0B0B0F; --surface:#131319; --surface-2:#1A1A22; --line:#26262F;
+     --ink:#F3F3F0; --muted:#8B8B99; --faint:#86868F;
+-    --lima:#C5FF49; --lima-dim:#8FB833; --lime-ink:#C5FF49; --on-accent:#0B0B0F; --danger:#F2555A; --amber:#F5B14C; --violet:#6C5CE7;
++    --lima:#DDB65F; --lima-dim:#C79A3F; --lime-ink:#DDB65F; --on-accent:#0B0B0F; --danger:#F2555A; --amber:#F5B14C; --violet:#6C5CE7;
+     --r:14px;
+   }
+   *{box-sizing:border-box;margin:0;padding:0}
+@@ -19,7 +19,7 @@
+   body{background:var(--onyx);color:var(--ink);font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;position:relative;overflow-x:hidden}
+   body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+     background:radial-gradient(900px 600px at 88% -8%, rgba(108,92,231,.16), transparent 60%),
+-      radial-gradient(700px 500px at 6% 4%, rgba(197,255,73,.06), transparent 55%),
++      radial-gradient(700px 500px at 6% 4%, rgba(221,182,95,.06), transparent 55%),
+       radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.5), transparent),
+       radial-gradient(1px 1px at 70% 20%, rgba(255,255,255,.35), transparent),
+       radial-gradient(1px 1px at 45% 60%, rgba(255,255,255,.3), transparent),
+@@ -42,7 +42,7 @@
+   .nav-i .tt{position:absolute;left:52px;top:50%;transform:translateY(-50%);background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12px;padding:4px 9px;border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;transition:.15s;z-index:20}
+   .nav-i:hover .tt{opacity:1}
+   .rail .spacer{flex:1}
+-  .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2a2f1a,#454f28);border:1px solid #3a4326;display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--lime-ink)}
++  .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2f2712,#4f421f);border:1px solid #43381c;display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--lime-ink)}
+ 
+   .main{padding:24px 32px 70px;max-width:1340px}
+   .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+@@ -64,7 +64,7 @@
+ 
+   /* hero funnel */
+   .hero{background:linear-gradient(180deg, rgba(26,26,34,.7), rgba(19,19,25,.7));border:1px solid var(--line);border-radius:20px;padding:22px 24px 12px;margin-bottom:18px;position:relative;overflow:hidden}
+-  .hero::after{content:"";position:absolute;top:-40%;right:-10%;width:420px;height:420px;background:radial-gradient(circle, rgba(197,255,73,.08), transparent 62%);pointer-events:none}
++  .hero::after{content:"";position:absolute;top:-40%;right:-10%;width:420px;height:420px;background:radial-gradient(circle, rgba(221,182,95,.08), transparent 62%);pointer-events:none}
+   .hero-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px;gap:14px;flex-wrap:wrap}
+   .hero-head h2{font-family:'Fraunces',serif;font-weight:500;font-size:19px;letter-spacing:-.01em;margin-top:5px}
+   .hero-head .lead{color:var(--muted);font-size:12.5px;max-width:360px}
+@@ -75,15 +75,15 @@
+ 
+   .funnel{display:grid;gap:0;align-items:end;height:200px;position:relative;padding-top:8px}
+   .stage{position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;padding:0 5px}
+-  .stage .bar{width:100%;max-width:64px;border-radius:8px 8px 0 0;position:relative;background:linear-gradient(180deg, rgba(197,255,73,.55), rgba(197,255,73,.10));border:1px solid rgba(197,255,73,.30);border-bottom:none;transition:height .4s}
+-  .stage.cash .bar{background:linear-gradient(180deg,rgba(197,255,73,.9),rgba(197,255,73,.3));border-color:var(--lime-ink)}
+-  .stage .node{position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;background:var(--lima);box-shadow:0 0 10px rgba(197,255,73,.8);z-index:3}
++  .stage .bar{width:100%;max-width:64px;border-radius:8px 8px 0 0;position:relative;background:linear-gradient(180deg, rgba(221,182,95,.55), rgba(221,182,95,.10));border:1px solid rgba(221,182,95,.30);border-bottom:none;transition:height .4s}
++  .stage.cash .bar{background:linear-gradient(180deg,rgba(221,182,95,.9),rgba(221,182,95,.3));border-color:var(--lime-ink)}
++  .stage .node{position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;background:var(--lima);box-shadow:0 0 10px rgba(221,182,95,.8);z-index:3}
+   .stage .cnt{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:16px;margin-top:10px;letter-spacing:-.02em}
+   .stage.cash .cnt{color:var(--lime-ink)}
+   .stage .lbl{font-size:10.5px;color:var(--muted);text-align:center;margin-top:2px;line-height:1.25}
+   .conv{position:absolute;top:44%;right:-1px;z-index:4;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 5px;white-space:nowrap}
+   .conv.bad{color:var(--danger);border-color:rgba(242,85,90,.4)}
+-  .conv.good{color:var(--lime-ink);border-color:rgba(197,255,73,.35)}
++  .conv.good{color:var(--lime-ink);border-color:rgba(221,182,95,.35)}
+   .tip{border-bottom:1px dotted var(--faint);cursor:help}
+ 
+   .row{display:grid;grid-template-columns:1.05fr 1.35fr 1.15fr;gap:18px;align-items:stretch;margin-bottom:18px}
+@@ -102,7 +102,7 @@
+   .goalmark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55}
+   .pace-foot{display:flex;align-items:center;gap:7px;margin-top:7px;font-size:12px}
+   .tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:100px}
+-  .tag.ok{color:var(--lime-ink);background:rgba(197,255,73,.10)}
++  .tag.ok{color:var(--lime-ink);background:rgba(221,182,95,.10)}
+   .tag.warn{color:var(--amber);background:rgba(245,177,76,.10)}
+   .tag.bad{color:var(--danger);background:rgba(242,85,90,.10)}
+   .empty{color:var(--faint);font-size:12.5px;padding:6px 0}
+@@ -113,7 +113,7 @@
+   .rep .rav{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:14px}
+   .rep.setter .rav{background:rgba(108,92,231,.16);color:#a99bff}
+   .rep.triage .rav{background:rgba(245,177,76,.14);color:var(--amber)}
+-  .rep.closer .rav{background:rgba(197,255,73,.14);color:var(--lime-ink)}
++  .rep.closer .rav{background:rgba(221,182,95,.14);color:var(--lime-ink)}
+   .rep .who{font-size:13.5px;font-weight:600}
+   .rep .role{font-size:11px;color:var(--muted);text-transform:capitalize}
+   .rep .kpis{display:flex;gap:16px;text-align:right}
+@@ -121,7 +121,7 @@
+   .rep .kpi .t{font-size:10px;color:var(--muted)}
+   .rep .kpi .n.warn{color:var(--amber)} .rep .kpi .n.bad{color:var(--danger)} .rep .kpi .n.good{color:var(--lime-ink)}
+ 
+-  .coach{background:linear-gradient(180deg, rgba(26,30,16,.5), rgba(19,19,25,.6));border:1px solid rgba(197,255,73,.22);border-radius:var(--r);padding:18px 19px}
++  .coach{background:linear-gradient(180deg, rgba(26,30,16,.5), rgba(19,19,25,.6));border:1px solid rgba(221,182,95,.22);border-radius:var(--r);padding:18px 19px}
+   .coach .ch{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+   .coach .spark{width:26px;height:26px;border-radius:8px;background:var(--lima);display:grid;place-items:center;flex:none}
+   .coach .spark svg{width:15px;height:15px}
+@@ -168,6 +168,16 @@
+   .field label{font-size:12px;color:var(--muted);font-weight:500}
+   .inp{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink);font-size:14px;width:100%}
+   .inp:focus{outline:none;border-color:var(--lima-dim)}
++  .inp:disabled{opacity:.4;cursor:not-allowed}
++  /* móvil: instructivo compacto (expandible al tocarlo), tooltips del rail ocultos */
++  @media(max-width:520px){
++    .cap-intro p{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
++    .cap-intro.open p{display:block;-webkit-line-clamp:unset}
++    .nav-i .tt{display:none}
++  }
++  /* foco de teclado en la navegación */
++  .nav-i:focus-visible{outline:2px solid var(--lima);outline-offset:2px}
++
+   .btn{background:var(--lima);color:var(--on-accent);border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px}
+   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+   .btn.sm{padding:7px 12px;font-size:13px}
+@@ -178,7 +188,7 @@
+   .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:100px;text-transform:capitalize}
+   .pill.setter{background:rgba(108,92,231,.16);color:#a99bff}
+   .pill.triage{background:rgba(245,177,76,.14);color:var(--amber)}
+-  .pill.closer{background:rgba(197,255,73,.14);color:var(--lime-ink)}
++  .pill.closer{background:rgba(221,182,95,.14);color:var(--lime-ink)}
+ 
+   .section{margin-bottom:22px}
+   .section .eyebrow{margin-bottom:12px}
+@@ -202,10 +212,10 @@
+ 
+   /* capture status + done */
+   .cap-intro{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:16px}
+-  .cap-intro .ico{width:30px;height:30px;border-radius:9px;background:rgba(197,255,73,.12);color:var(--lime-ink);display:grid;place-items:center;flex:none;font-size:16px}
++  .cap-intro .ico{width:30px;height:30px;border-radius:9px;background:rgba(221,182,95,.12);color:var(--lime-ink);display:grid;place-items:center;flex:none;font-size:16px}
+   .cap-intro p{font-size:13px;color:var(--muted);line-height:1.5}
+   .cap-intro b{color:var(--ink)}
+-  .savepill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--lima-dim);background:rgba(197,255,73,.08);border:1px solid rgba(197,255,73,.2);padding:6px 11px;border-radius:100px;transition:.2s}
++  .savepill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--lima-dim);background:rgba(221,182,95,.08);border:1px solid rgba(221,182,95,.2);padding:6px 11px;border-radius:100px;transition:.2s}
+   .savepill.flash{color:var(--on-accent);background:var(--lima);border-color:var(--lime-ink)}
+   .cap-done{margin-top:16px;display:flex;justify-content:flex-end}
+ 
+@@ -222,9 +232,9 @@
+   .grid thead th.tot{z-index:3;color:var(--muted)}
+   .grid input.cell{width:44px;height:34px;background:transparent;border:none;color:var(--ink);text-align:center;font-family:'JetBrains Mono';font-size:12.5px;padding:0;-moz-appearance:textfield}
+   .grid input.cell::-webkit-outer-spin-button,.grid input.cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+-  .grid input.cell:focus{outline:2px solid var(--lima);outline-offset:-2px;background:rgba(197,255,73,.08)}
++  .grid input.cell:focus{outline:2px solid var(--lima);outline-offset:-2px;background:rgba(221,182,95,.08)}
+   .grid input.cell:hover{background:rgba(255,255,255,.03)}
+-  .grid td.today{background:rgba(197,255,73,.04)}
++  .grid td.today{background:rgba(221,182,95,.04)}
+   .grid tr.drow td{background:rgba(255,255,255,.02);font-family:'JetBrains Mono';color:var(--muted);padding:7px 6px}
+   .grid tr.drow .stickyc{color:var(--ink);background:#171720}
+   .grid tr.drow td.tot{background:#171720}
+@@ -234,18 +244,18 @@
+   /* ---------- Tema claro ---------- */
+   body[data-theme="light"]{
+     --onyx:#F5F5EF; --surface:#FFFFFF; --surface-2:#F1F1EA; --line:#E4E4DC;
+-    --ink:#191920; --muted:#63636F; --faint:#6B6B75; --lime-ink:#43670E; --lima-dim:#4E7A12; --danger:#C8353A;
++    --ink:#191920; --muted:#63636F; --faint:#6B6B75; --lime-ink:#7A5C1A; --lima-dim:#8A6A24; --danger:#C8353A;
+   }
+   body[data-theme="light"]::before{background:
+     radial-gradient(900px 600px at 88% -8%, rgba(108,92,231,.08), transparent 60%),
+-    radial-gradient(700px 500px at 6% 4%, rgba(197,255,73,.16), transparent 55%)}
++    radial-gradient(700px 500px at 6% 4%, rgba(221,182,95,.16), transparent 55%)}
+   body[data-theme="light"] .hero{background:linear-gradient(180deg,#ffffff,#fbfbf5)}
+-  body[data-theme="light"] .coach{background:linear-gradient(180deg,#fafce6,#ffffff)}
++  body[data-theme="light"] .coach{background:linear-gradient(180deg,#faf5e2,#ffffff)}
+   body[data-theme="light"] .coach p{color:#33332e}
+   body[data-theme="light"] .grid tr.drow .stickyc,
+-  body[data-theme="light"] .grid tr.drow td.tot{background:#edefe4}
++  body[data-theme="light"] .grid tr.drow td.tot{background:#efe9da}
+   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
+-  body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
++  body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #f3eedd, #f6f6f0);border-color:#e6dcc2}
+   /* contraste de roles/tags en claro */
+   body[data-theme="light"] .pill.setter,
+   body[data-theme="light"] .rep.setter .rav{color:#5b45d6;background:rgba(108,92,231,.12)}
+@@ -274,7 +284,7 @@
+   .clik{cursor:pointer;transition:.14s;border-radius:5px}
+   .clik:hover{color:var(--lime-ink)}
+   .cnt.clik:hover,.conv.clik:hover{filter:brightness(1.15)}
+-  td.clik:hover{background:rgba(197,255,73,.06)}
++  td.clik:hover{background:rgba(221,182,95,.06)}
+   .drill-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:56px 20px;overflow-y:auto}
+   .drill{background:var(--surface);border:1px solid var(--line);border-radius:16px;width:100%;max-width:560px;padding:22px 24px;box-shadow:0 30px 90px rgba(0,0,0,.55);position:relative;animation:drillin .17s ease}
+   @keyframes drillin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@@ -314,19 +324,33 @@
+     .funnel{height:160px}
+   }
+ </style>
++<link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,400;0,500;0,600;1,500&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
++<style id="clara-brand">
++:root{
++  --onyx:#0A0805; --surface:#12100A; --surface-2:#1A160D; --line:#2A2416;
++  --ink:#F4EFE6; --muted:#9A9184; --faint:#8F8779;
++}
++body[data-theme="light"]{
++  --onyx:#F7F4EC; --surface:#FFFFFF; --surface-2:#F1EDE2; --line:#E6DFD0;
++  --ink:#191410; --muted:#5F584A; --faint:#6B6455;
++}
++body{font-family:'Montserrat',system-ui,sans-serif}
++[style*="Fraunces"]{font-family:'Cormorant',serif !important}
++.agency h1,h2.view,.hero-head h2{font-family:'Cormorant',serif;letter-spacing:.3px}
++</style>
+ </head>
+ <body>
+ <div class="app">
+   <nav class="rail">
+     <div class="brand" title="Maze">
+-      <svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/><circle cx="12" cy="10" r="1.4" fill="#C5FF49" stroke="none"/></svg>
++      <svg viewBox="0 0 24 24" fill="none" stroke="#DDB65F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/><circle cx="12" cy="10" r="1.4" fill="#DDB65F" stroke="none"/></svg>
+     </div>
+     <div class="nav-i" data-view="dashboard" title="Panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="tt">Panel</span></div>
++    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
+     <div class="nav-i" data-view="capture" title="Cargar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="tt">Cargar día</span></div>
+     <div class="nav-i" data-view="table" title="Tabla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15"/></svg><span class="tt">Tabla (día por día)</span></div>
+     <div class="nav-i" data-view="team" title="Configuraciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.7 7.7 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1H10.6l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.7 7.7 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h2.8l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 1.7-3z"/></svg><span class="tt">Configuraciones</span></div>
+-    <div class="nav-i" data-view="goals" title="Metas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="tt">Metas</span></div>
+-    <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
++    <!-- Metas oculto temporalmente (2026-07-04, pedido de Ale) — restaurar: re-agregar nav-i data-view="goals" -->
+     <div class="spacer"></div>
+     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
+     <div class="nav-i" data-action="logout" title="Cerrar sesión"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5M15 12H3"/></svg><span class="tt">Cerrar sesión</span></div>
+@@ -545,6 +569,7 @@ const VIEW = document.getElementById('view');
+ let state = { view:'dashboard', ptype:'week', ref: todayStr(), capMember:null, capDate:null };
+ function go(view){ state.view=view; render(); }
+ document.querySelectorAll('.nav-i').forEach(el=>{
++  el.tabIndex=0; el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); el.click(); } });
+   el.addEventListener('click',()=>{
+     if(el.dataset.action==='theme'){ toggleTheme(); return; }
+     if(el.dataset.action==='logout'){ if(confirm('¿Cerrar sesión?')) doLogout(); return; }
+@@ -651,7 +676,7 @@ function pacingCard(){
+       <div class="pace-foot">${tag}<span style="color:var(--muted)">${txt}</span></div>
+     </div>`;
+   });
+-  if(!rows) rows=`<div class="empty">Sin metas cargadas. Definilas en <b>Metas</b>.</div>`;
++  if(!rows) rows=`<div class="empty">Sin metas cargadas por ahora.</div>`;
+   return `<div class="card"><div class="card-head"><div><div class="eyebrow">Ritmo</div><h3 style="margin-top:4px">Metas de la semana ${info('Compara lo real contra tu meta y calcula el ritmo: te dice si vas adelantado o atrasado según cuántos días de la semana ya pasaron.')}</h3></div></div>${rows}</div>`;
+ }
+ function weekElapsedFrac(cw){
+@@ -836,12 +861,12 @@ function renderCapture(){
+           <div class="tr"><input class="money-in" type="number" min="0" value="${val}" onchange="setMoney('${mt.k}', this.value)"></div></div>`;
+       } else {
+         taps+=`<div class="tap"><div><div class="tl">${mt.label}</div><div class="def">${mt.def}</div></div>
+-          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
++          <div class="tr"><button class="step" onclick="bump('${mt.k}',-1)">−</button><span class="num" id="n_${mt.k}" ondblclick="editNum('${mt.k}')" title="Doble clic para escribir el número">${val}</span><button class="step plus" onclick="bump('${mt.k}',1)">+</button></div></div>`;
+       }
+     });
+     const isToday = state.capDate===todayStr();
+     body=`<div class="cap-wrap">
+-      <div class="cap-intro">
++      <div class="cap-intro" onclick="this.classList.toggle('open')">
+         <div class="ico">☝</div>
+         <p>Tocá <b>+</b> cada vez que pasa algo (una conversación nueva, una respuesta, un link enviado…). <b>No hay botón de guardar</b>: cada toque se guarda solo al instante. Cargá solo lo que uses; el resto dejalo en 0.</p>
+       </div>
+@@ -877,6 +902,29 @@ window.bump=(k,dir)=>{
+   const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
+   flashSave();
+ };
++window.setNum=(k,val)=>{
++  const key=state.capMember+'|'+state.capDate;
++  if(!DB.entries[key]) DB.entries[key]={};
++  const v=Math.max(0,Math.round(+val||0));
++  DB.entries[key][k]=v; save();
++  const el=document.getElementById('n_'+k); if(el) el.textContent=v;
++  const member=DB.members.find(m=>m.id===state.capMember);
++  const foot=document.getElementById('capSum'); if(foot&&member) foot.innerHTML=captureSummary(member,key);
++  flashSave();
++};
++window.editNum=(k)=>{
++  const el=document.getElementById('n_'+k); if(!el||el.querySelector('input')) return;
++  const cur=+el.textContent||0;
++  const inp=document.createElement('input');
++  inp.type='number'; inp.min='0'; inp.value=cur; inp.inputMode='numeric';
++  inp.style.cssText='width:66px;font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;text-align:right;background:var(--surface);color:var(--ink);border:1px solid var(--lima);border-radius:8px;padding:2px 6px;outline:none';
++  el.textContent=''; el.appendChild(inp); inp.focus(); inp.select();
++  let done=false;
++  const commit=()=>{ if(done)return; done=true; setNum(k,Math.max(0,Math.round(+inp.value||0))); };
++  const cancel=()=>{ if(done)return; done=true; el.textContent=cur; };
++  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();commit();} else if(e.key==='Escape'){cancel();} });
++  inp.addEventListener('blur',commit);
++};
+ window.setMoney=(k,val)=>{
+   const key=state.capMember+'|'+state.capDate;
+   if(!DB.entries[key]) DB.entries[key]={};
+@@ -1086,34 +1134,84 @@ function renderSales(){
+     </div>
+     <div class="section"><div class="eyebrow">Registrar venta</div>
+       <div class="grid2">
+-        <div class="field"><label>Cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+-        <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="High Ticket / Membresía / Lite"></div>
+-        <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="4000"></div>
+-        <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2000"></div>
++        <div class="field"><label>Cliente (estuvo en llamada)</label><select class="inp" id="s_lead" onchange="document.getElementById('s_cliente_wrap').style.display=this.value==='__manual__'?'':'none'"><option value="">Cargando leads con cita…</option></select></div>
++        <div class="field" id="s_cliente_wrap" style="display:none"><label>Nombre del cliente (manual)</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
++        <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="Mentoría 4 meses / Formación"></div>
++        <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="2500"></div>
++        <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2500"></div>
++        <div class="field"><label>Cantidad de pagos</label><input class="inp" id="s_cuotas" type="number" min="1" value="1"></div>
++        <div class="field"><label>Monto del primer pago ($)</label><input class="inp" id="s_primerpago" type="number" min="0" placeholder="2500"></div>
++        <div class="field"><label>¿Fue reserva (seña)?</label><select class="inp" id="s_reservaflag" onchange="const r=document.getElementById('s_reserva');r.disabled=!this.value;if(!this.value)r.value='';"><option value="">No</option><option value="1">Sí</option></select></div>
++        <div class="field"><label>Monto de la reserva ($)</label><input class="inp" id="s_reserva" type="number" min="0" placeholder="500" disabled></div>
+         <div class="field"><label>Fuente del lead</label><input class="inp" id="s_fuente" placeholder="Instagram / TikTok / YouTube"></div>
+-        <div class="field"><label>Método de pago</label><input class="inp" id="s_metodo" placeholder="Transferencia / Tarjeta"></div>
++        <div class="field"><label>Método de pago</label><input class="inp" id="s_metodo" placeholder="Transferencia / Tarjeta / Stripe"></div>
+         <div class="field"><label>Closer</label><select class="inp" id="s_closer">${opt(closers)}</select></div>
+-        <div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>
++        ${triages.length?`<div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>`:`<input type="hidden" id="s_triage" value="">`}
+         <div class="field"><label>Setter</label><select class="inp" id="s_setter">${opt(setters)}</select></div>
+       </div>
+-      <button class="btn" onclick="addSale()">Registrar venta</button>
++      <button class="btn" onclick="addSale()">Registrar venta y disparar onboarding</button>
+     </div>
+     <div class="section"><div class="eyebrow">Historial</div>
+       <div class="rollup"><table>
+         <thead><tr><th>Fecha</th><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Facturado</th><th>Cash</th><th style="text-align:left">Closer</th><th style="text-align:left">Fuente</th><th></th></tr></thead>
+         <tbody>${rows}</tbody></table></div></div>` + footer();
++  loadGhlLeads();
+ }
+ function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
++
++// Trae los leads con cita reciente del calendario de admisión (vía mini-API → GHL).
++let GHL_LEADS=[];
++async function loadGhlLeads(){
++  const sel=document.getElementById('s_lead'); if(!sel) return;
++  try{
++    const {data:{session}}=await sb.auth.getSession();
++    const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
++    const j=await r.json();
++    GHL_LEADS=j.leads||[];
++  }catch(e){ GHL_LEADS=[]; }
++  const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
++  sel.innerHTML = `<option value="">— Elegí el lead de la llamada —</option>`
++    + GHL_LEADS.map(c=>`<option value="${esc(c.id)}">${esc(fmt(c))}</option>`).join('')
++    + `<option value="__manual__">Otro (escribir a mano, sin GHL)</option>`;
++}
++
+ window.addSale=async()=>{
+   const g=(id)=>document.getElementById(id).value;
+-  const cliente=(g('s_cliente')||'').trim(); if(!cliente){ toast('Poné el cliente'); return; }
++  const leadSel=g('s_lead');
++  let cliente='', ghlId=null;
++  if(leadSel && leadSel!=='__manual__'){
++    const lead=GHL_LEADS.find(l=>l.id===leadSel);
++    cliente=lead?lead.name:''; ghlId=leadSel;
++  } else {
++    cliente=(g('s_cliente')||'').trim();
++  }
++  if(!cliente){ toast('Elegí el lead o escribí el cliente'); return; }
++  const fueReserva=!!g('s_reservaflag');
+   const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
+-    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:0,reserva:0,
++    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:+g('s_cuotas')||1,reserva:+g('s_reserva')||0,
++    primer_pago:+g('s_primerpago')||0,fue_reserva:fueReserva,ghl_contact_id:ghlId,
+     closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
+   const {data,error}=await sb.from('st_sales').insert(row).select().single();
+   if(error){ toast('No se pudo (permiso)'); return; }
+-  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:0,reserva:0,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
+-  toast('Venta registrada'); renderSales();
++  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:row.cuotas,reserva:row.reserva,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
++
++  // Cierre del ciclo en GHL: custom fields + tag de onboarding + aviso a Slack.
++  if(ghlId){
++    try{
++      const closer=DB.members.find(m=>m.id===row.closer_id);
++      const {data:{session}}=await sb.auth.getSession();
++      const r=await fetch('/api/sales/ghl',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
++        body:JSON.stringify({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
++          cuotas:row.cuotas,metodo:row.metodo,fueReserva:fueReserva,reserva:row.reserva,primerPago:row.primer_pago,
++          vendedor:closer?closer.name:''})});
++      const j=await r.json();
++      if(j.ok){ toast(fueReserva?'Reserva registrada — tag "reserva" aplicado 🔒':'Venta registrada — onboarding disparado 🎉'); }
++      else { toast('Venta guardada, pero GHL falló: revisá el contacto'); }
++    }catch(e){ toast('Venta guardada, pero GHL falló: revisá el contacto'); }
++  } else {
++    toast('Venta registrada (sin contacto GHL — no dispara onboarding)');
++  }
++  renderSales();
+ };
+ window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); renderSales(); };
+ 
+@@ -1122,9 +1220,8 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;'
+ function info(tip){ return `<span class="info" data-tip="${esc(tip)}">i</span>`; }
+ function adminNotice(){ return IS_ADMIN ? '' : '<div class="admin-lock">🔒 <span>Solo el admin puede editar esta sección. Puedes ver los datos del equipo, pero no modificarlos.</span></div>'; }
+ function footer(){ return `<div class="footnote">
+-  <span>Maze Sales Tracker IA · v1 funcional</span><span class="dot2"></span>
+-  <span>Datos guardados en este navegador</span><span class="dot2"></span>
+-  <a href="https://github.com/mazeos/maze-sales-tracker" target="_blank" rel="noopener">repo</a></div>`; }
++  <span>Camino Digital — Sales Tracker</span><span class="dot2"></span>
++  <span>Sincronizado en la nube</span></div>`; }
+ let toastT;
+ function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
+ window.toast=toast;
+@@ -1170,7 +1267,7 @@ function renderLogin(msg){
+   let ov=document.getElementById('loginOv'); if(!ov){ ov=document.createElement('div'); ov.id='loginOv'; document.body.appendChild(ov); }
+   ov.style.cssText='position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(900px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--onyx)';
+   ov.innerHTML=`<form onsubmit="return doLogin(event)" style="width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:30px 28px;box-shadow:0 30px 90px rgba(0,0,0,.5)">
+-    <div style="display:flex;align-items:center;gap:9px;margin-bottom:18px"><div class="brand" style="width:34px;height:34px;margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="#C5FF49" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/></svg></div><b style="font-family:Fraunces,serif;font-weight:500;font-size:18px">Maze Sales Tracker</b></div>
++    <div style="display:flex;align-items:center;gap:9px;margin-bottom:18px"><div class="brand" style="width:34px;height:34px;margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="#DDB65F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"/><path d="M8 21v-6h8v6"/></svg></div><b style="font-family:Fraunces,serif;font-weight:500;font-size:18px">Camino Digital</b></div>
+     <h2 style="font-family:Fraunces,serif;font-weight:500;font-size:21px;margin-bottom:4px">Entrá a tu cuenta</h2>
+     <p style="color:var(--muted);font-size:13px;margin-bottom:18px">Cargá y mirá los números de tu equipo.</p>
+     ${msg?`<div style="background:rgba(242,85,90,.1);border:1px solid rgba(242,85,90,.3);color:var(--danger);font-size:12.5px;padding:9px 11px;border-radius:9px;margin-bottom:12px">${esc(msg)}</div>`:''}
