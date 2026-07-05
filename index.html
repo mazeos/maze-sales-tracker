@@ -452,19 +452,20 @@ async function pushToSupabase(){
     await sb.from('st_orgs').update({name:DB.team.name,team_mode:DB.team.mode,tz:DB.team.tz,commission_base:DB.team.commission_base||'contador'}).eq('id',DB.team.id);
     for(const m of DB.members){ await sb.from('st_profiles').update({name:m.name,role:m.role,commission:m.commission||0}).eq('id',m.id); }
     await sb.from('st_goals').upsert({org_id:DB.team.id,period:'week',goals:DB.goals.week||{}},{onConflict:'org_id,period'});
+    await sb.from('st_goals').upsert({org_id:DB.team.id,period:'month',goals:DB.goals.month||{}},{onConflict:'org_id,period'});
   }
 }
 async function loadFromSupabase(){
   const org=(await sb.from('st_orgs').select('*').eq('id',ME.org_id).single()).data;
   const profs=(await sb.from('st_profiles').select('*').eq('org_id',ME.org_id)).data||[];
   const ents=(await sb.from('st_entries').select('*').eq('org_id',ME.org_id)).data||[];
-  const goalRow=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).eq('period','week').maybeSingle()).data;
+  const goalRows=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).in('period',['week','month'])).data||[];
   const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
   const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
       members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
-      entries:{}, goals:{week:(goalRow&&goalRow.goals)||{}},
+      entries:{}, goals:{week:((goalRows.find(g=>g.period==='week')||{}).goals)||{}, month:((goalRows.find(g=>g.period==='month')||{}).goals)||{}},
       sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
       cuotas:cuotas.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}))};
   ents.forEach(e=>{ DB.entries[e.member_id+'|'+e.entry_date]=e.metrics||{}; });
@@ -2026,6 +2027,7 @@ window.delMember=async (id)=>{
 // ---------- Metas ----------
 function renderGoals(){
   const g=DB.goals.week||{};
+  const gm=DB.goals.month||{};
   const ro=!IS_ADMIN;
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Metas</div><h2 class="view">Objetivos semanales del equipo</h2>
     ${adminNotice()}
@@ -2036,9 +2038,16 @@ function renderGoals(){
         <div class="field"><label>Agendados / semana</label><input class="inp" type="number" min="0" value="${g.agendados||''}" onchange="setGoal('agendados',this.value)" ${ro?'disabled':''}></div>
       </div>
       <p style="color:var(--muted);font-size:13px;margin-top:6px">El panel usa estas metas para el <b>pacing</b>: te dice si el equipo va adelantado o atrasado según cuántos días de la semana ya pasaron.</p>
+    </div>
+    <div class="cap-wrap" style="margin-top:18px">
+      <div class="eyebrow" style="margin-bottom:10px">Meta de caja del mes ${info('Plata cobrada total del mes: cash y reservas de ventas nuevas + cuotas cobradas. El progreso y el ritmo se ven en la vista Caja.')}</div>
+      <div class="grid2">
+        <div class="field"><label>Caja del mes ($)</label><input class="inp" type="number" min="0" value="${gm.caja||''}" onchange="setGoalMonth('caja',this.value)" ${ro?'disabled':''}></div>
+      </div>
     </div>` + footer();
 }
 window.setGoal=(k,v)=>{ if(!IS_ADMIN) return; if(!DB.goals.week) DB.goals.week={}; const n=+v||0; if(n) DB.goals.week[k]=n; else delete DB.goals.week[k]; save(); toast('Meta guardada'); };
+window.setGoalMonth=(k,v)=>{ if(!IS_ADMIN) return; if(!DB.goals.month) DB.goals.month={}; const n=+v||0; if(n) DB.goals.month[k]=n; else delete DB.goals.month[k]; save(); toast('Meta guardada'); };
 
 // ---------- Ventas ----------
 function renderSales(){
