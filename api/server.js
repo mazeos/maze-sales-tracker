@@ -598,9 +598,15 @@ function ghlUserName(u) {
 
 // ---------- GET /api/ghl/users ----------
 // Lista los usuarios de la subcuenta GHL de la org con su estado respecto del
-// tracker (nuevo / vinculable / importado / inactivo) y reconcilia: GHL es la
-// última palabra — un perfil importado cuyo usuario ya no está en la subcuenta
-// se da de baja automáticamente (active=false + ban).
+// tracker (nuevo / vinculable / importado / inactivo) y reconcilia TOTAL: con
+// GHL conectado, GHL es la única fuente de verdad del equipo no-admin.
+//   1. Auto-link: perfil activo sin ghl_user_id cuyo email coincide exacto con
+//      un usuario GHL → se vincula (solo ghl_user_id) y sale "importado".
+//   2. Huérfanos manuales: perfil activo no-admin que quedó sin ghl_user_id
+//      tras el auto-link → baja automática (active=false + ban).
+//   3. Desvinculados: perfil importado cuyo usuario ya no está en la subcuenta
+//      (o figura deleted) → baja automática (active=false + ban).
+// Los perfiles con role='admin' NUNCA se dan de baja automáticamente.
 async function listGhlUsers(req, res, admin) {
   const integration = await getIntegration(admin.org_id);
   if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
@@ -639,6 +645,38 @@ async function listGhlUsers(req, res, admin) {
   const byGhlId = new Map();
   for (const p of profs) { if (p.ghl_user_id) byGhlId.set(p.ghl_user_id, p); }
 
+  // Reconciliación total — paso 1: auto-vincular por email exacto. Un perfil
+  // activo sin ghl_user_id cuyo email (GoTrue admin, nunca el body del cliente)
+  // coincide con un usuario GHL se vincula automáticamente: se setea SOLO
+  // ghl_user_id (role/name/active/contraseña intactos). Corre ANTES del map de
+  // `users` para que los recién vinculados salgan "importado", no "vinculable".
+  const auto_linked = [];
+  for (const u of ghlUsers) {
+    const email = typeof u.email === 'string' ? u.email.toLowerCase().trim() : null;
+    if (!email) continue;
+    if (byGhlId.has(u.id)) continue; // ese ghl_user_id ya está tomado por otro perfil
+    const p = emailToProfile.get(email);
+    if (!p || p.ghl_user_id || p.active === false) continue;
+    try {
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
+        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ ghl_user_id: u.id }) }
+      );
+      if (patchRes.status < 200 || patchRes.status >= 300) {
+        console.error(`[api] GET /api/ghl/users org=${admin.org_id} autolink_fail id=${p.id} status=${patchRes.status}`);
+        continue;
+      }
+    } catch {
+      console.error(`[api] GET /api/ghl/users org=${admin.org_id} autolink_fetch_fail id=${p.id}`);
+      continue;
+    }
+    p.ghl_user_id = u.id;
+    byGhlId.set(u.id, p);
+    emailToProfile.delete(email);
+    auto_linked.push(p.name);
+    console.log(`[api] GET /api/ghl/users org=${admin.org_id} autolink id=${p.id} name=${p.name} ghl_user_id=${u.id}`);
+  }
+
   // Estado de cada usuario GHL respecto del tracker.
   const users = ghlUsers.map((u) => {
     const email = typeof u.email === 'string' ? u.email.toLowerCase().trim() : null;
@@ -655,10 +693,46 @@ async function listGhlUsers(req, res, admin) {
     };
   });
 
-  // Reconciliación — GHL manda (D-04): perfiles importados activos cuyo usuario
-  // ya no está en la subcuenta (o figura deleted) → baja automática.
   const ghlIds = new Set(ghlUsers.map((u) => u.id));
   const removed = [];
+
+  // Reconciliación total — paso 2: huérfanos manuales. Con GHL conectado, todo
+  // perfil activo no-admin que quedó sin ghl_user_id tras el auto-link no existe
+  // en la subcuenta → baja automática (mismo patrón PATCH+ban del paso 3).
+  // EXCEPCIÓN INAMOVIBLE: los perfiles con role='admin' NUNCA se dan de baja acá
+  // — el admin de la org puede no ser usuario de la subcuenta GHL; sin esta
+  // excepción el dueño se bloquearía a sí mismo al conectar. Corre DESPUÉS del
+  // map de `users`: los huérfanos manuales no aparecen en la lista GHL.
+  for (const p of profs) {
+    const orphan = p.active !== false && !p.ghl_user_id && p.role !== 'admin';
+    if (!orphan) continue;
+    try {
+      const patchRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
+        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
+      );
+      if (patchRes.status < 200 || patchRes.status >= 300) {
+        console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fail id=${p.id} status=${patchRes.status}`);
+        continue;
+      }
+    } catch {
+      console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fetch_fail id=${p.id}`);
+      continue;
+    }
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(p.id), {
+        method: 'PUT',
+        headers: svcHeaders(),
+        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
+      });
+    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
+    p.active = false; // consistencia del objeto local con la DB
+    console.log(`[api] GET /api/ghl/users org=${admin.org_id} baja_auto id=${p.id} name=${p.name} (huérfano manual con GHL conectado)`);
+    removed.push(p.name);
+  }
+
+  // Reconciliación — paso 3, GHL manda (D-04): perfiles importados activos cuyo
+  // usuario ya no está en la subcuenta (o figura deleted) → baja automática.
   for (const p of profs) {
     if (!p.ghl_user_id || p.active === false || ghlIds.has(p.ghl_user_id)) continue;
     try {
@@ -685,9 +759,10 @@ async function listGhlUsers(req, res, admin) {
     removed.push(p.name);
   }
 
-  console.log(`[api] GET /api/ghl/users admin=${admin.uid} users=${users.length} removed=${removed.length} -> 200`);
+  console.log(`[api] GET /api/ghl/users admin=${admin.uid} users=${users.length} removed=${removed.length} auto_linked=${auto_linked.length} -> 200`);
   // access_code = Location ID (D-03: contraseña inicial del equipo). NUNCA tokens.
-  return sendJSON(res, 200, { access_code: integration.location_id, users, removed });
+  // auto_linked/removed llevan solo nombres — jamás tokens ni emails de auth.
+  return sendJSON(res, 200, { access_code: integration.location_id, users, removed, auto_linked });
 }
 
 // ---------- POST /api/ghl/users/import ----------
