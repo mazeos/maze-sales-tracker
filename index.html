@@ -2010,8 +2010,66 @@ function renderTeam(){
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     ${addMemberBox}
-    ${ghlCard()}${ghlTeamCard()}` + footer();
+    ${ghlCard()}${ghlTeamCard()}${IS_ADMIN ? calibracionCard() : ''}` + footer();
 }
+
+// ---------- Panel de calibración (auto-carga en sombra, Fase A) ----------
+let SHADOW=null, SHADOW_LOADING=false, KPI_CFG=null;
+async function loadShadow(){
+  if(SHADOW_LOADING) return; SHADOW_LOADING=true;
+  const desde=dstr(new Date(Date.now()-14*86400000));
+  const [sm,kc]=await Promise.all([
+    sb.from('st_shadow_metrics').select('*').eq('org_id',ME.org_id).gte('metric_date',desde),
+    sb.from('st_kpi_config').select('*').eq('org_id',ME.org_id),
+  ]);
+  SHADOW=sm.data||[]; KPI_CFG=kc.data||[]; SHADOW_LOADING=false;
+  if(state.view==='team') renderTeam();
+}
+function calibracionCard(){
+  if(SHADOW===null){ loadShadow(); return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra)</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando calibración…</p></div>`; }
+  const cfgRow=(KPI_CFG||[]).find(k=>k.kpi==='_config');
+  const doms=((cfgRow&&cfgRow.config&&cfgRow.config.booking_domains)||[]).join(', ');
+  const nameOf=(id)=>{ const m=DB.members.find(x=>x.id===id); return m?m.name:'—'; };
+  const byKpi={};
+  SHADOW.forEach(r=>{ (byKpi[r.kpi]=byKpi[r.kpi]||[]).push(r); });
+  let rows='';
+  Object.keys(byKpi).sort().forEach(k=>{
+    const rs=byKpi[k].sort((a,b)=>a.metric_date<b.metric_date?1:-1);
+    const comparables=rs.filter(r=>r.manual_value!=null);
+    const matches=comparables.filter(r=>+r.auto_value===+r.manual_value);
+    const pct=comparables.length?Math.round(matches.length/comparables.length*100):null;
+    let racha=0; for(const r of rs){ if(r.manual_value!=null && +r.auto_value===+r.manual_value) racha++; else break; }
+    const ult=rs[0];
+    const chip=pct===null?`<span class="cuo-est">sin datos manuales</span>`:(pct>=90?`<span class="cuo-est paga">${pct}% match</span>`:`<span class="cuo-est venc">${pct}% match</span>`);
+    rows+=`<tr><td style="text-align:left">${esc(k)}</td><td style="text-align:left">${esc(nameOf(ult&&ult.member_id))}</td><td>${ult?ult.metric_date:'—'}</td><td>${ult?+ult.auto_value:'—'}</td><td>${ult&&ult.manual_value!=null?+ult.manual_value:'—'}</td><td>${chip}</td><td>${racha} días</td></tr>`;
+  });
+  if(!rows) rows=`<tr><td colspan="7" class="empty">Sin corridas todavía. Tocá "Correr ahora" para la primera.</td></tr>`;
+  return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra) ${info('El motor calcula cada KPI desde GHL y el tracker, y lo compara con lo cargado a mano. Nada se escribe en los contadores: esto es solo calibración. Cuando un KPI venga clavado varios días, en la Fase B vas a poder graduarlo a automático.')}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <button class="btn sm" onclick="runShadow()" id="shadowBtn">Correr ahora</button>
+      <input class="inp" style="max-width:340px" placeholder="Dominios de agenda (coma): agendar.mazefunnels.io" value="${esc(doms)}" onchange="setBookingDomains(this.value)" data-tip="Para contar los links de agenda que envía el setter.">
+    </div>
+    <div class="rollup"><table>
+      <thead><tr><th style="text-align:left">KPI</th><th style="text-align:left">Miembro</th><th>Último día</th><th>Auto</th><th>Manual</th><th>Match 14d</th><th>Racha</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+}
+window.runShadow=async()=>{
+  const btn=document.getElementById('shadowBtn'); if(btn){ btn.disabled=true; btn.textContent='Corriendo…'; }
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const r=await fetch('/api/shadow/run',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({})});
+    const j=await r.json().catch(()=>null);
+    if(!r.ok){ toast((j&&j.error)||'Falló la corrida'); }
+    else toast(`Sombra corrida: ${j.rows} valores de ${j.members} miembros`);
+  }catch(e){ toast('Falló la corrida'); }
+  SHADOW=null; renderTeam();
+};
+window.setBookingDomains=async(v)=>{
+  if(!IS_ADMIN) return;
+  const domains=v.split(',').map(s=>s.trim()).filter(Boolean);
+  const {error}=await sb.from('st_kpi_config').upsert({org_id:ME.org_id,kpi:'_config',config:{booking_domains:domains}},{onConflict:'org_id,kpi'});
+  toast(error?'No se pudo guardar':'Dominios guardados'); KPI_CFG=null; SHADOW=null; renderTeam();
+};
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
 window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
