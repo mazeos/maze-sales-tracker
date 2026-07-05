@@ -349,6 +349,8 @@
     <div class="nav-i" data-view="table" title="Tabla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15"/></svg><span class="tt">Tabla (día por día)</span></div>
     <div class="nav-i" data-view="team" title="Configuraciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.7 7.7 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.7 7.7 0 0 0-1.7-1l-.3-2.1H10.6l-.3 2.1a7.7 7.7 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.7 7.7 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.7 7.7 0 0 0 1.7 1l.3 2.1h2.8l.3-2.1a7.7 7.7 0 0 0 1.7-1l2 .8 1.7-3z"/></svg><span class="tt">Configuraciones</span></div>
     <div class="nav-i" data-view="goals" title="Metas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="tt">Metas</span></div>
+    <!-- Plataforma: oculto por defecto; se muestra solo si /api/platform/settings responde 200 (super-admin). La seguridad real es server-side. -->
+    <div class="nav-i" data-view="platform" id="nav-platform" title="Plataforma" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9.5 7h1M13.5 7h1M9.5 11h1M13.5 11h1M9.5 15h1M13.5 15h1M10.5 21v-3h3v3"/></svg><span class="tt">Plataforma</span></div>
     <div class="spacer"></div>
     <div class="nav-i" data-action="theme" title="Tema claro/oscuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="tt">Tema claro / oscuro</span></div>
     <div class="nav-i" data-action="password" title="Cambiar mi contraseña"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg><span class="tt">Cambiar mi contraseña</span></div>
@@ -586,6 +588,7 @@ function render(){
   else if(state.view==='team') renderTeam();
   else if(state.view==='goals') renderGoals();
   else if(state.view==='sales') renderSales();
+  else if(state.view==='platform') renderPlatform();
   window.scrollTo(0,0);
 }
 
@@ -1020,6 +1023,9 @@ function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=su
 // ---------- Integración HighLevel ----------
 // Estado de la conexión GHL de la org (null = todavía no se consultó a la API).
 let GHL_STATUS=null, GHL_LOADING=false;
+// Flag del retorno OAuth con ?ghl_error=location_mismatch: el admin autorizó
+// una subcuenta distinta a la pre-asignada (se muestra banner en ghlCard).
+let GHL_MISMATCH=false;
 // Calendarios elegibles para "Calendario de llamadas" (null = todavía no se
 // consultó; objeto = respuesta del GET {calendars, selected, selected_name, hint?}
 // o {error:true, msg} si falló).
@@ -1085,6 +1091,14 @@ function ghlCard(){
     body=`<p style="font-size:13.5px;margin:0 0 12px">✅ Conectado a <b>${esc(GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta')}</b>${fecha?` <span style="color:var(--muted)">· desde el ${fecha}</span>`:''}</p>
       ${ghlCalendarBlock()}
       <button class="btn danger sm" onclick="disconnectGhl()">Desconectar</button>`;
+  } else if(GHL_STATUS.pending){
+    // Subcuenta pre-asignada desde Plataforma: falta que el admin autorice el OAuth.
+    const locName=GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta';
+    const mismatchBox=GHL_MISMATCH
+      ? `<div class="admin-lock">⚠️ <span>Autorizaste otra subcuenta. Tenés que elegir <b>${esc(locName)}</b>.</span></div>`
+      : '';
+    body=`${mismatchBox}<p style="font-size:13.5px;margin:0 0 12px">Subcuenta asignada: <b>${esc(locName)}</b> — falta autorizar la conexión</p>
+      <button class="btn" onclick="connectGhl()">Conectar con HighLevel</button>`;
   } else {
     body=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Conectá tu subcuenta de HighLevel para que el tracker cargue actividad automáticamente. Sin conexión, la carga manual sigue funcionando igual.</p>
       <button class="btn" onclick="connectGhl()">Conectar con HighLevel</button>`;
@@ -1316,12 +1330,23 @@ window.submitPassword=async (ev)=>{
   return false;
 };
 
-// ---------- Organizaciones (SOLO super-admins de Maze) ----------
+// ---------- Plataforma (SOLO super-admins de Maze) ----------
+// IS_SUPER: se resuelve en boot() con un fetch a /api/platform/settings —
+// 200 = super-admin (se muestra el ítem del rail); cualquier otro status o
+// error de red = queda oculto, silencioso (fail-closed; la seguridad real es
+// server-side, el rail es solo cosmética).
+// PLAT_SETTINGS: respuesta de GET /api/platform/settings — {agency_pit_set,
+// agency_pit_hint}. Solo el hint de 4 chars: el token completo jamás llega.
+let IS_SUPER=false, PLAT_SETTINGS=null;
 // ORGS_ALLOWED: null = todavía no se consultó, false = 401/403 u otro error
-// (fail-closed: no se renderiza NADA, ni el título), true = super-admin.
+// (fail-closed), true = super-admin confirmado por /api/orgs.
 // ORG_CREATED: credenciales del último alta — viven SOLO en memoria hasta que
 // se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
 let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
+// Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
+// resultados de la última búsqueda (para pickear por índice sin inyectar
+// datos de GHL en atributos onclick) + timer del debounce.
+let PLAT_LOC_SEL=null, PLAT_LOC_RESULTS=[], _locT;
 async function loadOrgs(){
   if(ORGS_LOADING) return;
   ORGS_LOADING=true;
@@ -1331,15 +1356,16 @@ async function loadOrgs(){
     const res=await fetch('/api/orgs',{headers:{'Authorization':'Bearer '+session.access_token}});
     const data=await res.json().catch(()=>null);
     if(res.ok && data){ ORGS=data.orgs||[]; ORGS_ALLOWED=true; }
-    // 401/403 y cualquier otro error → fail-closed, silencioso: un admin normal
-    // no debe enterarse de que la sección existe.
+    // 401/403 y cualquier otro error → fail-closed, silencioso.
     else{ ORGS_ALLOWED=false; }
   }catch(e){ ORGS_ALLOWED=false; }
-  finally{ ORGS_LOADING=false; if(state.view==='team') renderTeam(); }
+  finally{ ORGS_LOADING=false; if(state.view==='platform') renderPlatform(); }
 }
 function orgsCard(){
-  if(ORGS_ALLOWED===false) return '';
-  if(ORGS_ALLOWED===null){ loadOrgs(); return ''; }
+  // La vista entera ya es solo super-admin (renderPlatform guarda con IS_SUPER),
+  // pero si /api/orgs falló se avisa en vez de reintentar en loop.
+  if(ORGS_ALLOWED===false) return `<div class="section"><div class="eyebrow">Organizaciones</div><p style="color:var(--muted);font-size:13px;margin:0">No se pudieron cargar las organizaciones. Recargá la página para reintentar.</p></div>`;
+  if(ORGS===null){ loadOrgs(); return `<div class="section"><div class="eyebrow">Organizaciones</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando…</p></div>`; }
   // (a) Box de credenciales del último alta (un solo uso).
   let credBox='';
   if(ORG_CREATED){
@@ -1375,7 +1401,17 @@ function orgsCard(){
       <thead><tr><th style="text-align:left">Nombre</th><th>Miembros</th><th style="text-align:left">HighLevel</th><th style="text-align:left">Admins</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   }
-  // (c) Form de alta.
+  // (c) Form de alta, con buscador de subcuenta de la agencia (opcional).
+  // Si hay subcuenta elegida → chip fijado con ✕; si no → input con debounce
+  // que pinta SOLO #platLocResults (nunca re-render completo: se pierde el foco).
+  const locField=PLAT_LOC_SEL
+    ? `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+        <div><button class="chip" type="button" onclick="clearPlatLoc()" data-tip="Quitar la subcuenta elegida">${esc(PLAT_LOC_SEL.name)} ✕</button></div>
+      </div>`
+    : `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+        <input class="inp" id="platLocQ" placeholder="Buscar subcuenta de tu agencia…" autocomplete="off" oninput="platLocSearch(this.value)">
+        <div id="platLocResults"></div>
+      </div>`;
   const form=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px">
     <b style="font-size:13px;display:block;margin:0 0 8px">Nueva organización</b>
     <div class="grid2">
@@ -1383,11 +1419,52 @@ function orgsCard(){
       <div class="field"><label>Nombre del admin</label><input class="inp" id="orgAdminName" placeholder="Ej: Clara"></div>
       <div class="field"><label>Email del admin</label><input class="inp" id="orgAdminEmail" type="email" placeholder="admin@email.com"></div>
       <div class="field"><label>Contraseña</label><input class="inp" id="orgAdminPass" type="text" placeholder="dejá vacío para autogenerar"></div>
+      ${locField}
     </div>
     <button class="btn" onclick="createOrg()" ${ORG_CREATING?'disabled':''}>${ORG_CREATING?'Creando…':'Crear organización'}</button>
   </div>`;
   return `<div class="section"><div class="eyebrow">Organizaciones</div>${credBox}${tableBox}${form}</div>`;
 }
+// Buscador de subcuentas: debounce 400ms → GET /api/platform/locations?q= →
+// pinta SOLO #platLocResults. Todo dato de GHL pasa por esc() antes del
+// innerHTML; el click se resuelve por índice sobre PLAT_LOC_RESULTS (jamás se
+// inyectan name/id de GHL en un atributo onclick).
+window.platLocSearch=(q)=>{
+  clearTimeout(_locT);
+  _locT=setTimeout(async ()=>{
+    const box=document.getElementById('platLocResults');
+    if(!box) return;
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+    let res, data;
+    try{
+      res=await fetch('/api/platform/locations?q='+encodeURIComponent(q||''),{headers:{'Authorization':'Bearer '+session.access_token}});
+      data=await res.json().catch(()=>({}));
+    }catch(e){ box.innerHTML=`<div class="empty">No se pudo conectar con el servidor</div>`; return; }
+    if(!res.ok){
+      // 409 = falta configurar el token de agencia: mostrar el error del backend como hint.
+      box.innerHTML=`<div class="empty">${esc(data.error||'No se pudieron buscar las subcuentas')}</div>`;
+      return;
+    }
+    PLAT_LOC_RESULTS=data.locations||[];
+    if(!PLAT_LOC_RESULTS.length){ box.innerHTML=`<div class="empty">Sin resultados</div>`; return; }
+    box.innerHTML=PLAT_LOC_RESULTS.map((l,i)=>{
+      const meta=[l.city,l.country].filter(Boolean).join(', ');
+      const metaHtml=meta?` <span style="color:var(--muted);font-size:12px">· ${esc(meta)}</span>`:'';
+      if(l.linked_org){
+        return `<div class="li" style="opacity:.45;margin-top:6px">${esc(l.name)}${metaHtml}<span style="color:var(--muted);font-size:12px">ya vinculada a ${esc(l.linked_org)}</span></div>`;
+      }
+      return `<div class="li" style="cursor:pointer;margin-top:6px" onclick="pickPlatLoc(${i})">${esc(l.name)}${metaHtml}</div>`;
+    }).join('');
+  },400);
+};
+window.pickPlatLoc=(i)=>{
+  const l=PLAT_LOC_RESULTS[i];
+  if(!l || l.linked_org) return;
+  PLAT_LOC_SEL={id:l.id, name:l.name};
+  renderPlatform();
+};
+window.clearPlatLoc=()=>{ PLAT_LOC_SEL=null; renderPlatform(); };
 window.createOrg=async ()=>{
   if(ORG_CREATING) return;
   const name=(document.getElementById('orgName').value||'').trim();
@@ -1401,9 +1478,10 @@ window.createOrg=async ()=>{
   const { data:{ session } } = await sb.auth.getSession();
   if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
   ORG_CREATING=true;
-  if(state.view==='team') renderTeam();
+  if(state.view==='platform') renderPlatform();
   const body={name, admin_name:adminName, admin_email:adminEmail};
   if(pass) body.admin_password=pass;
+  if(PLAT_LOC_SEL) body.location_id=PLAT_LOC_SEL.id;
   let res, data;
   try{
     res=await fetch('/api/orgs',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
@@ -1411,7 +1489,7 @@ window.createOrg=async ()=>{
   }catch(e){
     ORG_CREATING=false;
     toast('No se pudo conectar con el servidor');
-    if(state.view==='team') renderTeam();
+    if(state.view==='platform') renderPlatform();
     return;
   }
   ORG_CREATING=false;
@@ -1419,13 +1497,17 @@ window.createOrg=async ()=>{
     // La contraseña vive SOLO acá (memoria) hasta cerrar el box — jamás en
     // localStorage ni en logs.
     ORG_CREATED={ name:(data.org&&data.org.name)||name, email:data.admin_email||adminEmail, password:data.admin_password||null, existing:!!data.existing_account };
-    toast('Organización creada');
+    PLAT_LOC_SEL=null;
+    // Si el pre-vínculo de la subcuenta falló, el backend lo avisa con warning
+    // (la org igual se creó).
+    if(data.warning){ toast('Organización creada. '+data.warning, 7000); }
+    else{ toast('Organización creada'); }
     // Refrescar la tabla re-disparando el fetch. El box ORG_CREATED sobrevive
     // al refresh porque es estado aparte.
-    ORGS_ALLOWED=null; loadOrgs();
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
   } else {
     toast(data.error || 'No se pudo crear la organización');
-    if(state.view==='team') renderTeam();
+    if(state.view==='platform') renderPlatform();
   }
 };
 window.copyOrgCreds=async ()=>{
@@ -1445,7 +1527,45 @@ window.copyOrgCreds=async ()=>{
   }
   toast('Credenciales copiadas');
 };
-window.closeOrgCreds=()=>{ ORG_CREATED=null; renderTeam(); };
+window.closeOrgCreds=()=>{ ORG_CREATED=null; if(state.view==='platform') renderPlatform(); };
+
+// ---------- Vista Plataforma (renderPlatform) ----------
+// Exclusiva del super-admin: card de la API de agencia (token editable con
+// hint) + la sección Organizaciones completa (mudada desde Configuraciones).
+function renderPlatform(){
+  if(!IS_SUPER){ go('dashboard'); return; }
+  const setStatus=(PLAT_SETTINGS && PLAT_SETTINGS.agency_pit_set)
+    ? `<span class="tag ok">Configurada</span> <span class="ghl-code-val" style="font-size:14px">${esc(PLAT_SETTINGS.agency_pit_hint||'')}</span>`
+    : `<span class="tag warn">No configurada</span>`;
+  const pitCard=`<div class="section"><div class="eyebrow">API de agencia HighLevel</div>
+    <p style="font-size:13.5px;margin:0 0 10px">Estado: ${setStatus}</p>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 10px">Con este token la plataforma lista las subcuentas de tu agencia para pre-asignarlas al crear una organización. Se valida contra HighLevel antes de guardarse y nunca se vuelve a mostrar completo. Guardar vacío lo borra.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input class="inp" id="platPit" type="password" placeholder="Pegá el Private Integration Token de agencia" autocomplete="off" style="max-width:420px">
+      <button class="btn sm" onclick="savePlatPit()">Guardar</button>
+    </div>
+  </div>`;
+  VIEW.innerHTML = topbar('') + `<div class="eyebrow">Plataforma</div><h2 class="view">Plataforma ${info('Configuración global de Maze Sales Tracker: API de agencia de HighLevel y alta de organizaciones. Solo la ve el equipo de Maze.')}</h2>
+    ${pitCard}${orgsCard()}` + footer();
+}
+window.savePlatPit=async ()=>{
+  const inp=document.getElementById('platPit');
+  const valor=inp?inp.value.trim():'';
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/platform/settings',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({agency_pit:valor})});
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    PLAT_SETTINGS={agency_pit_set:!!data.agency_pit_set, agency_pit_hint:data.agency_pit_hint||null};
+    toast(data.agency_pit_set?'Token de agencia guardado':'Token de agencia eliminado');
+    if(state.view==='platform') renderPlatform();
+  } else {
+    toast(data.error || 'No se pudo guardar el token');
+  }
+};
 
 function renderTeam(){
   const ro = !IS_ADMIN;
@@ -1496,7 +1616,7 @@ function renderTeam(){
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     ${addMemberBox}
-    ${ghlCard()}${ghlTeamCard()}${orgsCard()}` + footer();
+    ${ghlCard()}${ghlTeamCard()}` + footer();
 }
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
@@ -1711,10 +1831,27 @@ async function boot(){
   const {data:prof}=await sb.from('st_profiles').select('*').eq('id',session.user.id).maybeSingle();
   if(!prof){ await sb.auth.signOut(); renderLogin('Tu cuenta no está habilitada en ningún equipo.'); return; }
   ME={id:prof.id,role:prof.role,name:prof.name,org_id:prof.org_id}; IS_ADMIN=prof.role==='admin';
+  // Detección super-admin (un único fetch tras el login): 200 en
+  // /api/platform/settings = super-admin → se muestra el ítem Plataforma.
+  // Cualquier otro status o error de red → queda oculto, silencioso
+  // (fail-closed, mismo espíritu que ORGS_ALLOWED). Best-effort: no bloquea el boot.
+  fetch('/api/platform/settings',{headers:{'Authorization':'Bearer '+session.access_token}})
+    .then(async (res)=>{
+      if(!res.ok) return;
+      const data=await res.json().catch(()=>null);
+      if(!data) return;
+      IS_SUPER=true; PLAT_SETTINGS=data;
+      const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
+    })
+    .catch(()=>{ /* fail-closed: el ítem queda oculto */ });
   // Retorno del flujo OAuth de GHL (query params que deja el callback de la mini-API).
   const qs=new URLSearchParams(location.search);
   if(qs.get('ghl')==='connected'){
     toast('HighLevel conectado ✅');
+    history.replaceState(null,'',location.pathname);
+  } else if(qs.get('ghl_error')==='location_mismatch'){
+    GHL_MISMATCH=true;
+    toast('Autorizaste otra subcuenta de HighLevel');
     history.replaceState(null,'',location.pathname);
   } else if(qs.get('ghl_error')){
     toast(qs.get('ghl_error')==='state' ? 'El enlace expiró, intentá conectar de nuevo' : 'No se pudo conectar con HighLevel');

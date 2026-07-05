@@ -20,6 +20,9 @@
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 //   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
 //   POST   /api/orgs               -> alta de una org + su admin (SOLO super-admins de Maze)
+//   GET    /api/platform/settings  -> estado del token de agencia GHL (solo hint, SOLO super-admins)
+//   POST   /api/platform/settings  -> guarda/borra el token de agencia GHL, validado en vivo (SOLO super-admins)
+//   GET    /api/platform/locations -> busca subcuentas de la agencia GHL por nombre/email/id (SOLO super-admins)
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -318,9 +321,61 @@ async function getIntegration(orgId) {
   }
 }
 
+// ---------- Settings de plataforma (st_platform_settings, deny-all) ----------
+// Key/value global de la plataforma. Solo la service role lee/escribe esta
+// tabla (RLS sin policies). El valor del PIT jamás sale de la API ni va a logs.
+const PIT_KEY = 'ghl_agency_pit'; // el NOMBRE de la key, no el valor — no es un secreto
+
+// Lee un setting. Devuelve el value o null (también null en error de red —
+// mismo patrón que getIntegration: el caller decide cómo responder).
+async function getPlatformSetting(key) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_platform_settings?key=eq.' + encodeURIComponent(key) + '&select=value',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) return null;
+    const rows = await r.json().catch(() => null);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return (row && typeof row.value === 'string') ? row.value : null;
+  } catch {
+    return null;
+  }
+}
+
+// Guarda (upsert) un setting. Devuelve true/false según éxito.
+async function setPlatformSetting(key, value) {
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_platform_settings?on_conflict=key', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }),
+    });
+    return r.status >= 200 && r.status < 300;
+  } catch {
+    return false;
+  }
+}
+
+// Borra un setting. Idempotente: true aunque la key no existiera.
+async function deletePlatformSetting(key) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_platform_settings?key=eq.' + encodeURIComponent(key),
+      { method: 'DELETE', headers: svcHeaders({ 'Prefer': 'return=minimal' }) }
+    );
+    return r.status >= 200 && r.status < 300;
+  } catch {
+    return false;
+  }
+}
+
 // Refresca el access_token de GHL si está por vencer (a menos de 5 min).
 // Queda listo para las fases siguientes de sync; hoy ninguna ruta crítica lo consume.
 async function refreshGhlToken(integration) {
+  // Guard defensivo: una fila pre-vinculada (pending) no tiene tokens — jamás
+  // postear refresh_token: undefined a GHL.
+  if (!integration.refresh_token) throw new Error('Integración sin tokens (pendiente de autorizar)');
   const expiresAt = integration.token_expires_at ? new Date(integration.token_expires_at).getTime() : 0;
   if (expiresAt - Date.now() >= 5 * 60 * 1000) {
     return integration.access_token; // todavía sirve, no hace falta refresh
@@ -374,7 +429,9 @@ async function refreshGhlToken(integration) {
 // llamada a getIntegration. OJO: la fila incluye tokens — jamás pasarla al browser.
 async function getGhlCreds(orgId) {
   const integration = await getIntegration(orgId);
-  if (integration) {
+  // Fila pre-vinculada SIN tokens (pending) = NO conectada: cae al fallback
+  // env PIT o null, como si no hubiera integración.
+  if (integration && integration.access_token) {
     return { token: await refreshGhlToken(integration), locationId: integration.location_id, integration };
   }
   if (GHL_PIT && GHL_LOCATION) {
@@ -884,6 +941,15 @@ async function oauthCallback(req, res, url) {
     return redirect(res, PUBLIC_URL + '/?ghl_error=token');
   }
 
+  // 3b. Guard de pre-vínculo: si la org tiene una subcuenta pre-asignada y el
+  // admin autorizó OTRA, NO se guarda nada — el pre-vínculo solo puede
+  // completarse con la subcuenta asignada. Logs con IDs, jamás tokens.
+  const existing = await getIntegration(orgId);
+  if (existing && existing.location_id && existing.location_id !== tok.locationId) {
+    console.log(`[api] GET /api/oauth/callback org=${orgId} location_mismatch esperada=${existing.location_id} autorizada=${tok.locationId} -> redirect ghl_error=location_mismatch`);
+    return redirect(res, PUBLIC_URL + '/?ghl_error=location_mismatch');
+  }
+
   // 4. Nombre de la subcuenta (best-effort: si falla, usamos el locationId).
   let locationName = tok.locationId;
   try {
@@ -929,14 +995,15 @@ async function oauthCallback(req, res, url) {
 }
 
 // ---------- GET /api/integrations/ghl ----------
-// Estado de conexión para la UI. NUNCA incluye access_token/refresh_token:
-// el select pide solo las columnas públicas.
+// Estado de conexión para la UI. El access_token se lee SOLO server-side para
+// distinguir pending (fila pre-vinculada sin tokens) de conectada — JAMÁS
+// viaja en la respuesta.
 async function getGhlStatus(req, res, admin) {
   let rows;
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id)
-        + '&select=location_id,location_name,created_at',
+        + '&select=location_id,location_name,created_at,access_token',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) {
@@ -949,6 +1016,15 @@ async function getGhlStatus(req, res, admin) {
 
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return sendJSON(res, 200, { connected: false });
+  // Fila sin access_token = subcuenta pre-asignada, falta autorizar (pending).
+  if (!row.access_token) {
+    return sendJSON(res, 200, {
+      connected: false,
+      pending: true,
+      location_id: row.location_id,
+      location_name: row.location_name,
+    });
+  }
   return sendJSON(res, 200, {
     connected: true,
     location_id: row.location_id,
@@ -1057,7 +1133,8 @@ function ghlUserName(u) {
 // Los perfiles con role='admin' NUNCA se dan de baja automáticamente.
 async function listGhlUsers(req, res, admin) {
   const integration = await getIntegration(admin.org_id);
-  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+  // Una fila pending (sin access_token) todavía no puede listar usuarios.
+  if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
   let ghlUsers;
   try {
@@ -1229,7 +1306,8 @@ async function importGhlUser(req, res, admin) {
   if (!GHL_IMPORT_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage, closer o admin' });
 
   const integration = await getIntegration(admin.org_id);
-  if (!integration) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+  // Una fila pending (sin access_token) todavía no puede importar usuarios.
+  if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
   let ghlUsers;
   try {
@@ -1566,6 +1644,7 @@ async function createOrg(req, res, sa) {
   const adminName = typeof body.admin_name === 'string' ? body.admin_name.trim() : '';
   const adminEmail = typeof body.admin_email === 'string' ? body.admin_email.trim() : '';
   let password = typeof body.admin_password === 'string' ? body.admin_password : '';
+  const locationId = typeof body.location_id === 'string' ? body.location_id.trim() : '';
 
   // Validaciones (mensajes en español latino, tuteo).
   if (!name) return sendJSON(res, 400, { error: 'Tienes que poner el nombre de la organización' });
@@ -1586,6 +1665,53 @@ async function createOrg(req, res, sa) {
     }
     password = acc.slice(0, 14);
     generated = true;
+  }
+
+  // Pre-vínculo de subcuenta (opcional): validaciones fail-fast ANTES de crear
+  // la org, así no se complica el rollback existente. JAMÁS se confía en el
+  // body: la location tiene que existir en la agencia y no estar ya vinculada.
+  let locationName = null;
+  if (locationId) {
+    // 1. PIT de agencia configurado.
+    const pit = await getPlatformSetting(PIT_KEY);
+    if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
+
+    // 2. La location existe en la agencia (resultado completo, sin el slice de 20).
+    let allLocations;
+    try {
+      allLocations = await searchAgencyLocations(pit, '');
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+    }
+    const loc = allLocations.find((l) => l.id === locationId);
+    if (!loc) return sendJSON(res, 400, { error: 'Esa subcuenta no existe en tu agencia' });
+    locationName = loc.name;
+
+    // 3. NO está ya vinculada a otra org.
+    try {
+      const dupRes = await fetch(
+        SUPABASE_URL + '/rest/v1/st_integrations?location_id=eq.' + encodeURIComponent(locationId) + '&select=org_id',
+        { headers: svcHeaders() }
+      );
+      if (dupRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudo verificar la subcuenta' });
+      const dupRows = await dupRes.json().catch(() => null);
+      const dup = Array.isArray(dupRows) ? dupRows[0] : null;
+      if (dup) {
+        let orgName = dup.org_id;
+        try {
+          const oRes = await fetch(
+            SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(dup.org_id) + '&select=name',
+            { headers: svcHeaders() }
+          );
+          const oRows = oRes.status === 200 ? await oRes.json().catch(() => null) : null;
+          const oRow = Array.isArray(oRows) ? oRows[0] : null;
+          if (oRow && oRow.name) orgName = oRow.name;
+        } catch { /* best-effort: el org_id de fallback alcanza para el mensaje */ }
+        return sendJSON(res, 409, { error: 'Esa subcuenta ya está vinculada a ' + orgName });
+      }
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo verificar la subcuenta' });
+    }
   }
 
   // a. Crear la org (tz y team_mode salen de los defaults del schema).
@@ -1713,8 +1839,164 @@ async function createOrg(req, res, sa) {
   const out = { org: { id: orgId, name }, admin_email: adminEmail, existing_account: existingAccount };
   if (generated && createdAuth) out.admin_password = password;
 
-  console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} -> 200`);
+  // Pre-vínculo: fila en st_integrations SIN tokens (quedan null = pending).
+  // El OAuth del admin del tenant completa el vínculo después. Si este INSERT
+  // falla NO se aborta ni rollbackea: la org ya existe y es válida — se avisa
+  // con un warning para que el super-admin reintente o conecte por OAuth.
+  if (locationId) {
+    let linked = false;
+    try {
+      const intRes = await fetch(SUPABASE_URL + '/rest/v1/st_integrations', {
+        method: 'POST',
+        headers: svcHeaders({ 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ org_id: orgId, provider: 'ghl', location_id: locationId, location_name: locationName }),
+      });
+      linked = intRes.status >= 200 && intRes.status < 300;
+    } catch { /* best-effort: se reporta en el warning */ }
+    if (linked) {
+      out.location_id = locationId;
+      out.location_name = locationName;
+    } else {
+      out.linked = false;
+      out.warning = 'La organización se creó pero no se pudo asignar la subcuenta. Asignala de nuevo o conectá por OAuth.';
+      console.log(`[api] POST /api/orgs super=${sa.email} prelink_fail org=${orgId} location=${locationId}`);
+    }
+  }
+
+  console.log(`[api] POST /api/orgs super=${sa.email} created org=${orgId} admin=${uid} existing=${existingAccount} location=${locationId || '-'} -> 200`);
   return sendJSON(res, 200, out);
+}
+
+// ---------- GET /api/platform/settings ----------
+// Estado del token de agencia GHL para la vista Plataforma. SOLO super-admins.
+// El token completo JAMÁS sale en la respuesta ni en logs: solo un hint
+// '····' + últimos 4 caracteres.
+async function getPlatformSettings(req, res, sa) {
+  const pit = await getPlatformSetting(PIT_KEY);
+  console.log(`[api] GET /api/platform/settings super=${sa.email} set=${!!pit} -> 200`);
+  return sendJSON(res, 200, {
+    agency_pit_set: !!pit,
+    agency_pit_hint: pit ? '····' + pit.slice(-4) : null,
+  });
+}
+
+// ---------- POST /api/platform/settings ----------
+// Guarda/reemplaza/borra el token de agencia GHL. SOLO super-admins.
+// Antes de guardar se valida EN VIVO contra locations/search: un token que no
+// puede listar subcuentas no sirve para nada acá. Body {agency_pit} vacío o
+// null = borrar el token. JAMÁS loggear el valor: solo set/cleared + email.
+async function setPlatformSettings(req, res, sa) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
+  const raw = parsed.data && parsed.data.agency_pit;
+  const pit = typeof raw === 'string' ? raw.trim() : '';
+
+  // Vacío = borrar el token (queda "no configurada").
+  if (!pit) {
+    const ok = await deletePlatformSetting(PIT_KEY);
+    if (!ok) return sendJSON(res, 500, { error: 'No se pudo borrar el token de agencia' });
+    console.log(`[api] POST /api/platform/settings super=${sa.email} cleared -> 200`);
+    return sendJSON(res, 200, { ok: true, agency_pit_set: false, agency_pit_hint: null });
+  }
+
+  // Validación en vivo: el token tiene que poder listar subcuentas.
+  try {
+    const testRes = await fetch(GHL_BASE + '/locations/search?limit=1', { headers: ghlHeaders(pit) });
+    if (testRes.status < 200 || testRes.status >= 300) {
+      console.log(`[api] POST /api/platform/settings super=${sa.email} invalid_pit status=${testRes.status} -> 400`);
+      return sendJSON(res, 400, { error: 'Token de agencia inválido o sin permisos de locations' });
+    }
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  const ok = await setPlatformSetting(PIT_KEY, pit);
+  if (!ok) return sendJSON(res, 500, { error: 'No se pudo guardar el token de agencia' });
+  console.log(`[api] POST /api/platform/settings super=${sa.email} set -> 200`);
+  return sendJSON(res, 200, { ok: true, agency_pit_set: true, agency_pit_hint: '····' + pit.slice(-4) });
+}
+
+// ---------- Subcuentas de la agencia (agency PIT) ----------
+// Pagina GET /locations/search hasta 3 páginas de 100 (300 locations máx —
+// tope anti-DoS aceptado: agencia de un solo super-admin). Corta antes si una
+// página vuelve incompleta. Si una página responde no-2xx, lanza Error (el
+// caller responde 502). Filtro `q` (lowercase/trim) contra name/email/id;
+// q vacío = todas. Devuelve [{id,name,city,country}] — jamás el objeto crudo
+// de GHL (email queda server-side, se usa solo para filtrar).
+async function searchAgencyLocations(pit, q) {
+  const acc = [];
+  for (let page = 0; page < 3; page++) {
+    const r = await fetch(GHL_BASE + '/locations/search?limit=100&skip=' + (page * 100), {
+      headers: ghlHeaders(pit),
+    });
+    if (r.status < 200 || r.status >= 300) {
+      console.error(`[api] searchAgencyLocations fail status=${r.status} page=${page}`);
+      throw new Error('No se pudo hablar con HighLevel');
+    }
+    const body = await r.json().catch(() => ({}));
+    const locs = Array.isArray(body && body.locations) ? body.locations : [];
+    acc.push(...locs);
+    if (locs.length < 100) break; // página incompleta: no hay más
+  }
+
+  const query = String(q || '').toLowerCase().trim();
+  const filtered = query
+    ? acc.filter((l) => l && (
+        String(l.name || '').toLowerCase().includes(query)
+        || String(l.email || '').toLowerCase().includes(query)
+        || String(l.id || '').toLowerCase().includes(query)
+      ))
+    : acc.filter((l) => l && l.id);
+
+  return filtered.map((l) => ({
+    id: l.id,
+    name: l.name || l.id,
+    city: l.city || '',
+    country: l.country || '',
+  }));
+}
+
+// ---------- GET /api/platform/locations?q= ----------
+// Buscador de subcuentas de la agencia para el alta de orgs. SOLO super-admins.
+// Anota `linked_org`: si la location ya está vinculada a una org del tracker,
+// el nombre de esa org (para deshabilitarla en la UI). Máximo 20 resultados.
+async function listAgencyLocations(req, res, sa, url) {
+  const pit = await getPlatformSetting(PIT_KEY);
+  if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
+
+  let locations;
+  try {
+    locations = await searchAgencyLocations(pit, url.searchParams.get('q') || '');
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+  }
+
+  // Vínculos existentes: location_id -> nombre de la org (o el org_id de fallback).
+  const linkedByLocation = new Map();
+  try {
+    const intsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_integrations?select=org_id,location_id',
+      { headers: svcHeaders() }
+    );
+    const ints = intsRes.status === 200 ? await intsRes.json().catch(() => null) : null;
+    const orgsRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?select=id,name',
+      { headers: svcHeaders() }
+    );
+    const orgs = orgsRes.status === 200 ? await orgsRes.json().catch(() => null) : null;
+    const orgName = new Map();
+    for (const o of (Array.isArray(orgs) ? orgs : [])) orgName.set(o.id, o.name);
+    for (const i of (Array.isArray(ints) ? ints : [])) {
+      if (i && i.location_id) linkedByLocation.set(i.location_id, orgName.get(i.org_id) || i.org_id);
+    }
+  } catch { /* best-effort: sin la anotación el buscador sigue sirviendo */ }
+
+  const out = locations.slice(0, 20).map((l) => ({
+    ...l,
+    linked_org: linkedByLocation.get(l.id) || null,
+  }));
+  console.log(`[api] GET /api/platform/locations super=${sa.email} n=${out.length} -> 200`);
+  return sendJSON(res, 200, { locations: out });
 }
 
 // ---------- Router ----------
@@ -1791,6 +2073,19 @@ const server = http.createServer(async (req, res) => {
       const sa = await requireSuperAdmin(req);
       if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
       return req.method === 'GET' ? listOrgs(req, res, sa) : createOrg(req, res, sa);
+    }
+
+    // Vista Plataforma: SOLO super-admins (mismo guard fail-closed que /api/orgs).
+    if (path === '/api/platform/settings' && (req.method === 'GET' || req.method === 'POST')) {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return req.method === 'GET' ? getPlatformSettings(req, res, sa) : setPlatformSettings(req, res, sa);
+    }
+
+    if (req.method === 'GET' && path === '/api/platform/locations') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return listAgencyLocations(req, res, sa, url);
     }
 
     // Todo lo demás bajo /api/members exige admin.
