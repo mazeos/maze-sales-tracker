@@ -1917,26 +1917,35 @@ async function setPlatformSettings(req, res, sa) {
 }
 
 // ---------- Subcuentas de la agencia (agency PIT) ----------
-// Pagina GET /locations/search hasta 3 páginas de 100 (300 locations máx —
+// Pagina GET /locations/search hasta 10 páginas de 100 (1000 locations máx —
 // tope anti-DoS aceptado: agencia de un solo super-admin). Corta antes si una
-// página vuelve incompleta. Si una página responde no-2xx, lanza Error (el
-// caller responde 502). Filtro `q` (lowercase/trim) contra name/email/id;
-// q vacío = todas. Devuelve [{id,name,city,country}] — jamás el objeto crudo
-// de GHL (email queda server-side, se usa solo para filtrar).
+// página vuelve incompleta. La lista completa se cachea en memoria 5 minutos
+// (la agencia cambia poco); el filtro `q` se aplica sobre el cache, así el
+// buscador con debounce no re-pagina GHL en cada tecla. Si una página responde
+// no-2xx, lanza Error (el caller responde 502). Filtro `q` (lowercase/trim)
+// contra name/email/id; q vacío = todas. Devuelve [{id,name,city,country}] —
+// jamás el objeto crudo de GHL (email queda server-side, solo para filtrar).
+let agencyLocationsCache = { at: 0, data: null };
 async function searchAgencyLocations(pit, q) {
-  const acc = [];
-  for (let page = 0; page < 3; page++) {
-    const r = await fetch(GHL_BASE + '/locations/search?limit=100&skip=' + (page * 100), {
-      headers: ghlHeaders(pit),
-    });
-    if (r.status < 200 || r.status >= 300) {
-      console.error(`[api] searchAgencyLocations fail status=${r.status} page=${page}`);
-      throw new Error('No se pudo hablar con HighLevel');
+  let acc;
+  if (agencyLocationsCache.data && Date.now() - agencyLocationsCache.at < 5 * 60 * 1000) {
+    acc = agencyLocationsCache.data;
+  } else {
+    acc = [];
+    for (let page = 0; page < 10; page++) {
+      const r = await fetch(GHL_BASE + '/locations/search?limit=100&skip=' + (page * 100), {
+        headers: ghlHeaders(pit),
+      });
+      if (r.status < 200 || r.status >= 300) {
+        console.error(`[api] searchAgencyLocations fail status=${r.status} page=${page}`);
+        throw new Error('No se pudo hablar con HighLevel');
+      }
+      const body = await r.json().catch(() => ({}));
+      const locs = Array.isArray(body && body.locations) ? body.locations : [];
+      acc.push(...locs);
+      if (locs.length < 100) break; // página incompleta: no hay más
     }
-    const body = await r.json().catch(() => ({}));
-    const locs = Array.isArray(body && body.locations) ? body.locations : [];
-    acc.push(...locs);
-    if (locs.length < 100) break; // página incompleta: no hay más
+    agencyLocationsCache = { at: Date.now(), data: acc };
   }
 
   const query = String(q || '').toLowerCase().trim();
