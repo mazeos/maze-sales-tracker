@@ -565,6 +565,32 @@ async function getAuthEmail(uid, cache) {
   return email;
 }
 
+// Busca un auth user por email EXACTO vía GoTrue admin. Se usa listado paginado
+// + filtro client-side (y no el query `?filter=`) porque ese filtro depende de
+// la versión de GoTrue y no está garantizado en self-hosted. `emailNorm` llega
+// ya normalizado (lowercase + trim). Recorre hasta 10 páginas de 100 y corta al
+// encontrar. Cualquier error de red/status → null (el caller responde genérico).
+async function findAuthUserByEmail(emailNorm) {
+  for (let page = 1; page <= 10; page++) {
+    let body;
+    try {
+      const r = await fetch(
+        SUPABASE_URL + '/auth/v1/admin/users?page=' + page + '&per_page=100',
+        { headers: svcHeaders() }
+      );
+      if (r.status < 200 || r.status >= 300) return null;
+      body = await r.json().catch(() => null);
+    } catch {
+      return null;
+    }
+    const users = body && Array.isArray(body.users) ? body.users : [];
+    const match = users.find((u) => u && typeof u.email === 'string' && u.email.toLowerCase().trim() === emailNorm);
+    if (match) return match;
+    if (users.length < 100) return null; // página incompleta o vacía: no hay más
+  }
+  return null;
+}
+
 // Nombre legible de un usuario GHL (name, o firstName + lastName).
 function ghlUserName(u) {
   return u.name || [u.firstName, u.lastName].filter(Boolean).join(' ');
@@ -777,8 +803,95 @@ async function importGhlUser(req, res, admin) {
   }
   if (authRes.status === 422 || authRes.status === 409 ||
       (authUser && /already|registered|exists|duplicate/i.test(JSON.stringify(authUser)))) {
-    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup -> 409`);
-    return sendJSON(res, 409, { error: 'Ese email ya tiene cuenta en otra organización' });
+    // El GoTrue es COMPARTIDO entre apps (tracker, CallIQ, etc.): que el email
+    // ya exista en auth.users NO significa "otra organización del tracker".
+    // Resolver contra el auth user real: vincular, rechazar o adoptar.
+    const emailNorm = email.toLowerCase().trim();
+    const existingAuth = await findAuthUserByEmail(emailNorm);
+    if (!existingAuth || !existingAuth.id) {
+      // Respuesta genérica: no filtrar información del auth compartido.
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_sin_match -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo crear el usuario. Inténtalo de nuevo.' });
+    }
+    const uid = existingAuth.id;
+
+    // Perfil del uid en el tracker (de cualquier org).
+    let dupProf;
+    try {
+      const r = await fetch(
+        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid)
+          + '&select=id,org_id,name,active,ghl_user_id',
+        { headers: svcHeaders() }
+      );
+      if (r.status !== 200) return sendJSON(res, 502, { error: 'No se pudieron leer los perfiles del equipo' });
+      const rows = await r.json().catch(() => null);
+      dupProf = Array.isArray(rows) ? rows[0] : null;
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudieron leer los perfiles del equipo' });
+    }
+
+    // Perfil en OTRA org del tracker → sí es un conflicto real.
+    if (dupProf && dupProf.org_id !== admin.org_id) {
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_otra_org -> 409`);
+      return sendJSON(res, 409, { error: 'Ese email ya pertenece a otro equipo del tracker' });
+    }
+
+    // Perfil en ESTA org → vincular (y reactivar + unban si estaba inactivo).
+    if (dupProf) {
+      const patch = { ghl_user_id: ghlUserId };
+      if (!dupProf.name) patch.name = name;
+      if (dupProf.active === false) patch.active = true;
+      try {
+        const patchRes = await fetch(
+          SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid),
+          { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify(patch) }
+        );
+        if (patchRes.status < 200 || patchRes.status >= 300) {
+          return sendJSON(res, 500, { error: 'No se pudo vincular al miembro' });
+        }
+      } catch {
+        return sendJSON(res, 500, { error: 'No se pudo vincular al miembro' });
+      }
+      if (dupProf.active === false) {
+        try {
+          await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+            method: 'PUT',
+            headers: svcHeaders(),
+            body: JSON.stringify({ ban_duration: 'none' }),
+          });
+        } catch { /* best-effort unban */ }
+      }
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_linked id=${uid} ghl=${ghlUserId} -> 200`);
+      return sendJSON(res, 200, { ok: true, linked: true });
+    }
+
+    // Sin perfil en NINGUNA org (cuenta de otra app del auth compartido) →
+    // adoptar: crear el st_profile sobre el uid existente. CRÍTICO:
+    // (1) JAMÁS tocar la contraseña ni ningún atributo del auth user — es una
+    //     cuenta viva de otra app del mismo auth;
+    // (2) si el INSERT falla, NO borrar el auth user — el rollback DELETE
+    //     aplica solo a auth users recién creados por este endpoint.
+    let adoptRes, adoptRows;
+    try {
+      adoptRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
+        method: 'POST',
+        headers: svcHeaders({ 'Prefer': 'return=representation' }),
+        body: JSON.stringify({ id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+      });
+      adoptRows = await adoptRes.json().catch(() => null);
+    } catch {
+      adoptRes = { status: 500 };
+    }
+    if (adoptRes.status < 200 || adoptRes.status >= 300) {
+      console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_profile_fail uid=${uid} -> 500`);
+      return sendJSON(res, 500, { error: 'No se pudo guardar el perfil del miembro.' });
+    }
+    const adopted = Array.isArray(adoptRows) ? adoptRows[0] : adoptRows;
+    console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_adopted uid=${uid} role=${role} ghl=${ghlUserId} -> 200`);
+    return sendJSON(res, 200, {
+      ...(adopted || { id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0, active: true }),
+      existing_account: true,
+    });
   }
   if (authRes.status < 200 || authRes.status >= 300 || !authUser || !authUser.id) {
     console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} auth_fail status=${authRes.status} -> 500`);
