@@ -486,7 +486,7 @@ function seed(){
   const sales = [
     {id:uid(), date:todayStr(), cliente:'Facundo Guerra', programa:'High Ticket', metodo:'Transferencia', facturado:4000, cash:2000, cuotas:2, reserva:0, closer:'m_nico', triage:'m_vale', setter:'m_facu', fuente:'Instagram'},
   ];
-  return { team:{name:'Camino Digital', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
+  return { team:{name:'Agencia Demo', mode:'full', tz:'America/Argentina/Buenos_Aires'}, members, entries, goals, sales };
 }
 
 // ---------- Períodos ----------
@@ -1377,34 +1377,100 @@ function renderSales(){
     </div>
     <div class="section"><div class="eyebrow">Registrar venta</div>
       <div class="grid2">
-        <div class="field"><label>Cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
+        <div class="field" id="s_lead_wrap" style="display:none"><label>Cliente (estuvo en llamada)</label><select class="inp" id="s_lead" onchange="document.getElementById('s_cliente_wrap').style.display=this.value==='__manual__'?'':'none'"><option value="">Cargando leads con cita…</option></select></div>
+        <div class="field" id="s_cliente_wrap"><label>Nombre del cliente</label><input class="inp" id="s_cliente" placeholder="Nombre"></div>
         <div class="field"><label>Programa</label><input class="inp" id="s_programa" placeholder="High Ticket / Membresía / Lite"></div>
         <div class="field"><label>Monto facturado ($)</label><input class="inp" id="s_fact" type="number" min="0" placeholder="4000"></div>
         <div class="field"><label>Cash collected ($)</label><input class="inp" id="s_cash" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>Cantidad de pagos</label><input class="inp" id="s_cuotas" type="number" min="1" value="1"></div>
+        <div class="field"><label>Monto del primer pago ($)</label><input class="inp" id="s_primerpago" type="number" min="0" placeholder="2000"></div>
+        <div class="field"><label>¿Fue reserva (seña)?</label><select class="inp" id="s_reservaflag" onchange="const r=document.getElementById('s_reserva');r.disabled=!this.value;if(!this.value)r.value='';"><option value="">No</option><option value="1">Sí</option></select></div>
+        <div class="field"><label>Monto de la reserva ($)</label><input class="inp" id="s_reserva" type="number" min="0" placeholder="500" disabled></div>
         <div class="field"><label>Fuente del lead</label><input class="inp" id="s_fuente" placeholder="Instagram / TikTok / YouTube"></div>
         <div class="field"><label>Método de pago</label><input class="inp" id="s_metodo" placeholder="Transferencia / Tarjeta"></div>
         <div class="field"><label>Closer</label><select class="inp" id="s_closer">${opt(closers)}</select></div>
-        <div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>
+        ${triages.length?`<div class="field"><label>Triage</label><select class="inp" id="s_triage">${opt(triages)}</select></div>`:`<input type="hidden" id="s_triage" value="">`}
         <div class="field"><label>Setter</label><select class="inp" id="s_setter">${opt(setters)}</select></div>
       </div>
-      <button class="btn" onclick="addSale()">Registrar venta</button>
+      <button class="btn" id="s_submit" onclick="addSale()">Registrar venta</button>
     </div>
     <div class="section"><div class="eyebrow">Historial</div>
       <div class="rollup"><table>
         <thead><tr><th>Fecha</th><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Facturado</th><th>Cash</th><th style="text-align:left">Closer</th><th style="text-align:left">Fuente</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>` + footer();
+  loadGhlLeads();
 }
 function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
+
+// Trae los leads con cita reciente del calendario de admisión (vía mini-API → GHL).
+// Fallback obligatorio: sin GHL (501/error/0 leads) la vista queda en modo manual
+// — input de nombre visible y botón "Registrar venta" — sin toast de error:
+// la ausencia de GHL es un estado normal, no una falla.
+let GHL_LEADS=[];
+async function loadGhlLeads(){
+  const sel=document.getElementById('s_lead'); if(!sel) return;
+  const manualMode=()=>{
+    GHL_LEADS=[];
+    const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='none';
+    const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='';
+    const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta';
+  };
+  let j=null;
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){ manualMode(); return; }
+    const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok){ manualMode(); return; }
+    j=await r.json();
+  }catch(e){ manualMode(); return; }
+  if(!j || !j.leads || !j.leads.length){ manualMode(); return; }
+  GHL_LEADS=j.leads;
+  const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
+  sel.innerHTML = `<option value="">— Elegí el lead de la llamada —</option>`
+    + GHL_LEADS.map(c=>`<option value="${esc(c.id)}">${esc(fmt(c))}</option>`).join('')
+    + `<option value="__manual__">Otro (escribir a mano, sin GHL)</option>`;
+  const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='';
+  const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='none';
+  const btn=document.getElementById('s_submit'); if(btn) btn.textContent='Registrar venta y disparar onboarding';
+}
+
 window.addSale=async()=>{
   const g=(id)=>document.getElementById(id).value;
-  const cliente=(g('s_cliente')||'').trim(); if(!cliente){ toast('Poné el cliente'); return; }
+  const leadSel=g('s_lead');
+  let cliente='', ghlId=null;
+  if(leadSel && leadSel!=='__manual__'){
+    const lead=GHL_LEADS.find(l=>l.id===leadSel);
+    cliente=lead?lead.name:''; ghlId=leadSel;
+  } else {
+    cliente=(g('s_cliente')||'').trim();
+  }
+  if(!cliente){ toast('Elegí el lead o escribí el cliente'); return; }
+  const fueReserva=!!g('s_reservaflag');
   const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
-    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:0,reserva:0,
+    facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:+g('s_cuotas')||1,reserva:+g('s_reserva')||0,
+    primer_pago:+g('s_primerpago')||0,fue_reserva:fueReserva,ghl_contact_id:ghlId,
     closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
   const {data,error}=await sb.from('st_sales').insert(row).select().single();
   if(error){ toast('No se pudo (permiso)'); return; }
-  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:0,reserva:0,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
-  toast('Venta registrada'); renderSales();
+  DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:row.cuotas,reserva:row.reserva,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
+
+  // Cierre del ciclo en GHL (best-effort): custom fields + tag de onboarding + oportunidad + Slack.
+  if(ghlId){
+    try{
+      const closer=DB.members.find(m=>m.id===row.closer_id);
+      const {data:{session}}=await sb.auth.getSession();
+      const r=await fetch('/api/sales/ghl',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
+        body:JSON.stringify({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
+          cuotas:row.cuotas,metodo:row.metodo,fueReserva:fueReserva,reserva:row.reserva,primerPago:row.primer_pago,
+          vendedor:closer?closer.name:''})});
+      const j=await r.json();
+      if(j.ok){ toast(fueReserva?'Reserva registrada — tag "reserva" aplicado 🔒':'Venta registrada — onboarding disparado 🎉'); }
+      else { toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+    }catch(e){ toast('Venta guardada, pero GHL falló: revisá el contacto'); }
+  } else {
+    toast('Venta registrada');
+  }
+  renderSales();
 };
 window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); renderSales(); };
 
