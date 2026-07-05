@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 Phase: 1 of 5 (Fundaciones multi-tenant y diccionario)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-04 - Completed quick task 260704-vqc: panel super-admin de organizaciones
+Last activity: 2026-07-04 - Completed quick task 260704-wmy: vista Plataforma super-admin
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -70,6 +70,7 @@ None yet.
 | 260704-u3n | Portar mejoras de la instancia de Clara (Ventas GHL, dblclick, rail, a11y) | 2026-07-04 | (merge) | [260704-u3n-portar-mejoras-de-la-instancia-de-clara-](./quick/260704-u3n-portar-mejoras-de-la-instancia-de-clara-/) |
 | 260704-uud | Fase 2.3 carcasa GHL — calendario de llamadas por org (closers sincronizados) | 2026-07-04 | (merge) | [260704-uud-fase-2-3-carcasa-ghl-calendario-de-llama](./quick/260704-uud-fase-2-3-carcasa-ghl-calendario-de-llama/) |
 | 260704-vqc | Panel super-admin de Organizaciones (alta de tenants) | 2026-07-04 | (merge) | [260704-vqc-panel-super-admin-de-organizaciones-alta](./quick/260704-vqc-panel-super-admin-de-organizaciones-alta/) |
+| 260704-wmy | Vista Plataforma super-admin — API de agencia + alta con subcuenta pre-vinculada | 2026-07-04 | (merge) | [260704-wmy-vista-plataforma-super-admin-api-de-agen](./quick/260704-wmy-vista-plataforma-super-admin-api-de-agen/) |
 
 ## Deferred Items
 
