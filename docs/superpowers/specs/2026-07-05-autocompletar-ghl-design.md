@@ -28,7 +28,7 @@ Auto solo lo **certero**; lo nativo (conversaciones, respuestas, links TikTok/IG
 - Trae los appointments del calendario del día pedido, con el día calculado en la **TZ de la org** (no UTC).
 - Arma la respuesta según el rol del miembro:
   - **Closer** (matchea por su `ghl_user_id` en `assignedUserId` de la cita): `llamadas` (citas del día), `asistencias` (status `showed`), `noshows` (status `noshow`)
-  - **Setter**: `agendados` = citas **creadas** ese día atribuibles a él con certeza. ⚠️ La atribución setter→cita en la API de GHL se verifica durante la implementación (campo `createdBy`/equivalente); si GHL no la da con certeza, la métrica se responde `certain:false` y la UI no la toca.
+  - **Setter**: VERIFICADO contra la API real (2026-07-05): `createdBy.userId` llega **null** (booking widget / third party) → la atribución setter→cita NO es certera. Además las métricas del setter están partidas por canal (`agend_ig`/`agend_wpp`) que GHL no conoce. **Decisión: v1 = autocompletar SOLO para closers**; setter y triage siguen 100% manuales (endpoint responde 400 para esos roles).
   - **Cierres/cash** (closer): query server-side a `st_sales` (`closer_id = member`, `sale_date = date`) con service role → `cierres` = cantidad, `cash` = Σ cash.
 - Respuesta: `{ date, member_id, metrics: { asistencias: {value, certain, source:'ghl'}, cierres: {value, certain, source:'ventas'}, ... } }` — solo las métricas que aplican al rol; todo lo no incluido es manual.
 - Miembro sin `ghl_user_id`: solo vuelven las métricas `source:'ventas'` (si es closer); las de GHL no aplican.
