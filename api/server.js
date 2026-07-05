@@ -17,6 +17,7 @@
 //   POST   /api/integrations/ghl/calendar -> guarda/desconfigura el calendario de llamadas de la org
 //   GET    /api/ghl/leads          -> leads con cita en el calendario de llamadas de la org (cualquier miembro activo)
 //   GET    /api/capture/ghl        -> autocompletar Cargar día del closer (citas GHL + ventas del día)
+//   POST   /api/shadow/run         -> corre la sombra de auto-carga de la org (admin; body {date?})
 //   POST   /api/sales/ghl          -> cierra el ciclo de la venta en GHL: custom fields + tag + oportunidad + Slack
 //   POST   /api/me/password        -> el usuario logueado cambia su propia contraseña
 //   GET    /api/orgs               -> lista todas las orgs del tracker (SOLO super-admins de Maze)
@@ -29,6 +30,7 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { computeMemberKpis } from './metrics.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
@@ -614,6 +616,96 @@ async function captureGhl(req, res, member, url) {
 
   return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics });
 }
+
+// ---------- Auto-carga Fase A: modo sombra ----------
+// Calcula los KPIs auto de cada miembro (closer/setter) y los guarda en
+// st_shadow_metrics JUNTO al valor manual del momento. NO toca st_entries
+// (la graduación/escritura es Fase B). Corre por scheduler nocturno (23:40
+// hora local de cada org) o a demanda vía POST /api/shadow/run (admin).
+async function svcGet(pathq) {
+  const r = await fetch(SUPABASE_URL + '/rest/v1/' + pathq, { headers: svcHeaders() });
+  return r.status === 200 ? r.json().catch(() => []) : [];
+}
+
+async function runShadowForOrg(orgId, dateStr) {
+  const orgs = await svcGet('st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=id,tz');
+  const org = orgs[0];
+  if (!org) throw new Error('org inexistente');
+  const tz = org.tz || 'America/Argentina/Buenos_Aires';
+  const date = dateStr || new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+
+  let creds = null;
+  try { creds = await getGhlCreds(orgId); } catch { /* sin GHL utilizable: solo KPIs internos */ }
+  const calendarId = (creds && creds.integration && creds.integration.calendar_id) || GHL_CALENDAR || null;
+
+  const members = await svcGet('st_profiles?org_id=eq.' + encodeURIComponent(orgId)
+    + '&select=id,role,ghl_user_id,active&role=in.(closer,setter)');
+  const activos = members.filter((m) => m.active !== false);
+  const salesRows = await svcGet('st_sales?org_id=eq.' + encodeURIComponent(orgId) + '&select=id,closer_id,sale_date,cash,reserva,facturado');
+  const cuotasRows = await svcGet('st_cuotas?org_id=eq.' + encodeURIComponent(orgId) + '&select=sale_id,status,paid_date,paid_amount');
+  const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
+  const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
+
+  const rows = [];
+  for (const m of activos) {
+    let kpis = {};
+    try {
+      kpis = await computeMemberKpis({
+        ghlBase: GHL_BASE, token: creds ? creds.token : null, locationId: creds ? creds.locationId : null,
+        calendarId: creds ? calendarId : null, tz, date, member: m, salesRows, cuotasRows, bookingDomains,
+      });
+    } catch (e) {
+      console.warn('[shadow] member', m.id, 'falló:', e.message);
+      continue;
+    }
+    const ents = await svcGet('st_entries?member_id=eq.' + encodeURIComponent(m.id) + '&entry_date=eq.' + encodeURIComponent(date) + '&select=metrics');
+    const manual = (ents[0] && ents[0].metrics) || {};
+    for (const [kpi, val] of Object.entries(kpis)) {
+      rows.push({ org_id: orgId, member_id: m.id, metric_date: date, kpi, auto_value: val, manual_value: manual[kpi] == null ? null : +manual[kpi], computed_at: new Date().toISOString() });
+    }
+  }
+  if (rows.length) {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
+      method: 'POST',
+      headers: { ...svcHeaders(), 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify(rows),
+    });
+    if (r.status >= 300) throw new Error('upsert sombra falló: ' + r.status);
+  }
+  return { org_id: orgId, date, members: activos.length, rows: rows.length };
+}
+
+async function shadowRun(req, res, admin) {
+  const parsed = await readJSONBody(req);
+  const date = (parsed.ok && parsed.data && parsed.data.date) ? String(parsed.data.date) : null;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return sendJSON(res, 400, { error: 'Fecha inválida (YYYY-MM-DD)' });
+  try {
+    const summary = await runShadowForOrg(admin.org_id, date);
+    return sendJSON(res, 200, { ok: true, ...summary });
+  } catch (e) {
+    return sendJSON(res, 502, { error: 'La corrida sombra falló: ' + e.message });
+  }
+}
+
+// Scheduler: cada 10 min revisa qué orgs están en su ventana 23:40–23:59 local
+// y corre la sombra del día (una vez por org por fecha, control en memoria).
+const shadowLastRun = new Map(); // orgId -> 'YYYY-MM-DD'
+async function shadowTick() {
+  try {
+    const orgs = await svcGet('st_orgs?select=id,tz');
+    for (const o of orgs) {
+      const tz = o.tz || 'America/Argentina/Buenos_Aires';
+      const now = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' }).format(new Date());
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+      const [hh, mm] = now.split(':').map(Number);
+      if (hh === 23 && mm >= 40 && shadowLastRun.get(o.id) !== today) {
+        shadowLastRun.set(o.id, today);
+        runShadowForOrg(o.id, today).then((s) => console.log('[shadow]', o.id, s.rows, 'filas')).catch((e) => console.warn('[shadow]', o.id, e.message));
+      }
+    }
+  } catch (e) { console.warn('[shadow] tick falló:', e.message); }
+}
+setInterval(shadowTick, 10 * 60 * 1000);
 
 // ---------- Calendarios GHL relevantes para la org (Fase 2.3) ----------
 // Lista los calendarios de la subcuenta GHL filtrados a los que atiende algún
@@ -2542,6 +2634,12 @@ const server = http.createServer(async (req, res) => {
       const member = await requireMember(req);
       if (!member.ok) return sendJSON(res, member.status, { error: member.error });
       return captureGhl(req, res, member, url);
+    }
+
+    if (req.method === 'POST' && path === '/api/shadow/run') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return shadowRun(req, res, admin);
     }
 
     if (req.method === 'POST' && path === '/api/sales/ghl') {
