@@ -1361,6 +1361,11 @@ let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREA
 // combobox (total server, índice highlighteado, abierto, listener de document).
 let PLAT_LOC_SEL=null, PLAT_LOC_RESULTS=[], _locT;
 let PLAT_LOC_TOTAL=0, PLAT_LOC_HL=-1, PLAT_LOC_OPEN=false, _locDocL=null;
+// Panel "Gestionar" por org: PLAT_M_ORG = id de la org con panel abierto (una
+// a la vez), PLAT_MEMBERS = miembros cargados del panel (null = cargando).
+// Las acciones del panel van SIEMPRE por índice sobre PLAT_MEMBERS — jamás
+// datos de usuario en atributos onclick.
+let PLAT_M_ORG=null, PLAT_MEMBERS=null, PLAT_M_LOADING=false, ADMIN_CREATING=false;
 // Iniciales de las dos primeras palabras (avatar del combobox); fallback '?'.
 function locInitials(name){
   const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
@@ -1412,14 +1417,21 @@ function orgsCard(){
   if(!(ORGS||[]).length){
     tableBox=`<div class="empty">Sin organizaciones todavía.</div>`;
   } else {
-    const rows=ORGS.map(o=>`<tr>
+    const rows=ORGS.map((o,i)=>{
+      let tr=`<tr>
       <td style="text-align:left">${esc(o.name||'—')}</td>
       <td>${+o.members_active||0}</td>
       <td style="text-align:left">${o.ghl_connected?esc(o.ghl_location_name||'Conectado'):'—'}</td>
       <td style="text-align:left">${(o.admins&&o.admins.length)?o.admins.map(a=>esc(a)).join(', '):'—'}</td>
-    </tr>`).join('');
+      <td><button class="btn ghost sm" onclick="toggleOrgPanel(${i})">${o.id===PLAT_M_ORG?'Cerrar':'Gestionar'}</button></td>
+    </tr>`;
+      // Panel expandible debajo de la fila (una org a la vez). colspan = total
+      // de columnas del thead (5).
+      if(o.id===PLAT_M_ORG) tr+=`<tr><td colspan="5" style="text-align:left">${orgPanelHtml()}</td></tr>`;
+      return tr;
+    }).join('');
     tableBox=`<div class="rollup"><table>
-      <thead><tr><th style="text-align:left">Nombre</th><th>Miembros</th><th style="text-align:left">HighLevel</th><th style="text-align:left">Admins</th></tr></thead>
+      <thead><tr><th style="text-align:left">Nombre</th><th>Miembros</th><th style="text-align:left">HighLevel</th><th style="text-align:left">Admins</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   }
   // (c) Form de alta, con buscador de subcuenta de la agencia (opcional).
@@ -1606,6 +1618,147 @@ window.copyOrgCreds=async ()=>{
   toast('Credenciales copiadas');
 };
 window.closeOrgCreds=()=>{ ORG_CREATED=null; if(state.view==='platform') renderPlatform(); };
+
+// ---------- Panel "Gestionar" por org (miembros + roles + admins) ----------
+// Abre/cierra el panel de una org (por índice sobre ORGS, patrón pickPlatLoc).
+window.toggleOrgPanel=(i)=>{
+  const o=ORGS&&ORGS[i];
+  if(!o) return;
+  if(PLAT_M_ORG===o.id){ PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  else{ PLAT_M_ORG=o.id; PLAT_MEMBERS=null; loadOrgMembers(); }
+  if(state.view==='platform') renderPlatform();
+};
+async function loadOrgMembers(){
+  if(PLAT_M_LOADING||!PLAT_M_ORG) return;
+  PLAT_M_LOADING=true;
+  const orgId=PLAT_M_ORG;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(!session){ toast('Tu sesión venció, vuelve a entrar'); PLAT_M_ORG=null; PLAT_MEMBERS=null; return; }
+    const res=await fetch('/api/orgs/'+encodeURIComponent(orgId)+'/members',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const data=await res.json().catch(()=>({}));
+    if(PLAT_M_ORG!==orgId) return; // se cerró/cambió de org mientras cargaba
+    if(res.ok){ PLAT_MEMBERS=data.members||[]; }
+    else{ toast(data.error||'No se pudieron cargar los miembros'); PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  }catch(e){
+    if(PLAT_M_ORG===orgId){ toast('No se pudo conectar con el servidor'); PLAT_M_ORG=null; PLAT_MEMBERS=null; }
+  }
+  finally{ PLAT_M_LOADING=false; if(state.view==='platform') renderPlatform(); }
+}
+// HTML del panel: lista de miembros (avatar, email, badges, select de rol,
+// activar/desactivar) + mini-form de alta de admin. Todo dato dinámico pasa
+// por esc(); las acciones van por índice sobre PLAT_MEMBERS.
+function orgPanelHtml(){
+  let list='';
+  if(PLAT_MEMBERS===null){
+    list=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando…</p>`;
+  } else if(!PLAT_MEMBERS.length){
+    list=`<div class="empty">Sin miembros todavía.</div>`;
+  } else {
+    list=PLAT_MEMBERS.map((m,idx)=>{
+      // Options con valores de un array literal fijo (jamás datos de usuario).
+      const roleSel=`<select class="inp" style="width:auto" onchange="changeMemberRole(${idx}, this.value)">${['admin','setter','triage','closer'].map(r=>`<option value="${r}"${m.role===r?' selected':''}>${r}</option>`).join('')}</select>`;
+      const actBtn=(m.active!==false)
+        ? `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Desactivar</button>`
+        : `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Reactivar</button>`;
+      const badges=`${m.ghl?'<span class="tag ok">GHL</span>':'<span class="tag">Manual</span>'}${(m.active!==false)?'':' <span class="tag warn">Inactivo</span>'}`;
+      return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span class="cbx-ava">${esc(locInitials(m.name))}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px"><b>${esc(m.name||'—')}</b> ${badges}</div>
+          <div style="color:var(--muted);font-size:12.5px">${esc(m.email||'—')}</div>
+        </div>
+        ${roleSel}
+        ${actBtn}
+      </div>`;
+    }).join('');
+  }
+  const form=`<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+    <b style="font-size:13px;display:block;margin:0 0 8px">Agregar admin</b>
+    <div class="grid2">
+      <div class="field"><label>Nombre</label><input class="inp" id="orgAdmName" placeholder="Ej: Clara"></div>
+      <div class="field"><label>Email</label><input class="inp" id="orgAdmEmail" type="email" placeholder="admin@email.com"></div>
+      <div class="field"><label>Contraseña</label><input class="inp" id="orgAdmPass" type="text" placeholder="dejá vacío para autogenerar"></div>
+    </div>
+    <button class="btn sm" onclick="addOrgAdmin()" ${ADMIN_CREATING?'disabled':''}>${ADMIN_CREATING?'Agregando…':'Agregar admin'}</button>
+  </div>`;
+  return `<div style="padding:10px 4px"><div class="eyebrow">Miembros</div>${list}${form}</div>`;
+}
+// PATCH genérico de un miembro del panel. Ante error (p.ej. 400 "sin admin")
+// NO se muta PLAT_MEMBERS: el re-render revierte el select/estado anterior.
+async function patchPanelMember(idx, patch, okMsg, failMsg){
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m||!PLAT_M_ORG) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/members/'+encodeURIComponent(m.id),{method:'PATCH',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(patch)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='platform') renderPlatform();
+    return;
+  }
+  if(res.ok){
+    if(patch.role!==undefined) m.role=patch.role;
+    if(patch.active!==undefined) m.active=patch.active;
+    toast(okMsg);
+    // Refrescar panel (emails/estado frescos) + tabla (contador de miembros).
+    loadOrgMembers();
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error||failMsg);
+    if(state.view==='platform') renderPlatform(); // revierte el select/estado
+  }
+}
+window.changeMemberRole=(idx, role)=>patchPanelMember(idx,{role},'Rol actualizado','No se pudo cambiar el rol');
+window.toggleMemberActive=(idx)=>{
+  const m=PLAT_MEMBERS&&PLAT_MEMBERS[idx];
+  if(!m) return;
+  const activar=m.active===false;
+  if(!activar && !confirm('¿Desactivar a este miembro? No va a poder entrar.')) return;
+  return patchPanelMember(idx,{active:activar},activar?'Miembro reactivado':'Miembro desactivado','No se pudo actualizar al miembro');
+};
+window.addOrgAdmin=async ()=>{
+  if(ADMIN_CREATING||!PLAT_M_ORG) return;
+  const name=(document.getElementById('orgAdmName').value||'').trim();
+  const email=(document.getElementById('orgAdmEmail').value||'').trim();
+  const pass=(document.getElementById('orgAdmPass').value||'').trim();
+  if(!name){ toast('Tienes que poner el nombre del admin'); return; }
+  if(!email){ toast('Tienes que poner el email del admin'); return; }
+  if(pass && pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  ADMIN_CREATING=true;
+  if(state.view==='platform') renderPlatform();
+  const body={name, email};
+  if(pass) body.password=pass;
+  let res, data;
+  try{
+    res=await fetch('/api/orgs/'+encodeURIComponent(PLAT_M_ORG)+'/admins',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
+    data=await res.json().catch(()=>({}));
+  }catch(e){
+    ADMIN_CREATING=false;
+    toast('No se pudo conectar con el servidor');
+    if(state.view==='platform') renderPlatform();
+    return;
+  }
+  ADMIN_CREATING=false;
+  if(res.ok){
+    // Reutiliza el box de credenciales de un solo uso: la password vive SOLO
+    // en ORG_CREATED (memoria) hasta cerrar el box — jamás se persiste ni loggea.
+    const org=(ORGS||[]).find(o=>o.id===PLAT_M_ORG);
+    ORG_CREATED={ name:((org&&org.name)||'Organización')+' — nuevo admin', email:data.admin_email||email, password:data.admin_password||null, existing:!!data.existing_account };
+    toast('Admin agregado');
+    // Re-render fresco del panel = inputs limpios; tabla con el admin nuevo.
+    loadOrgMembers();
+    ORGS=null; ORGS_ALLOWED=null; loadOrgs();
+  } else {
+    toast(data.error||'No se pudo agregar el admin');
+    if(state.view==='platform') renderPlatform();
+  }
+};
 
 // ---------- Vista Plataforma (renderPlatform) ----------
 // Exclusiva del super-admin: card de la API de agencia (token editable con
