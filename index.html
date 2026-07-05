@@ -449,7 +449,7 @@ async function pushToSupabase(){
   const rows=[]; for(const k in DB.entries){ const i=k.indexOf('|'); const mid=k.slice(0,i), ds=k.slice(i+1); if(IS_ADMIN||mid===ME.id) rows.push({org_id:DB.team.id,member_id:mid,entry_date:ds,metrics:DB.entries[k]}); }
   if(rows.length){ const {error}=await sb.from('st_entries').upsert(rows,{onConflict:'member_id,entry_date'}); if(error) console.warn('entries',error.message); }
   if(IS_ADMIN){
-    await sb.from('st_orgs').update({name:DB.team.name,team_mode:DB.team.mode,tz:DB.team.tz}).eq('id',DB.team.id);
+    await sb.from('st_orgs').update({name:DB.team.name,team_mode:DB.team.mode,tz:DB.team.tz,commission_base:DB.team.commission_base||'contador'}).eq('id',DB.team.id);
     for(const m of DB.members){ await sb.from('st_profiles').update({name:m.name,role:m.role,commission:m.commission||0}).eq('id',m.id); }
     await sb.from('st_goals').upsert({org_id:DB.team.id,period:'week',goals:DB.goals.week||{}},{onConflict:'org_id,period'});
   }
@@ -462,7 +462,7 @@ async function loadFromSupabase(){
   const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
   const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
   const order={admin:0,setter:1,triage:2,closer:3};
-  DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz},
+  DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
       members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
       entries:{}, goals:{week:(goalRow&&goalRow.goals)||{}},
       sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
@@ -835,7 +835,18 @@ function buildDrill(spec){
     if(!spec.memberId && spec.num.roles.join()===spec.den.roles.join()) body+=rateMemberTable(A,B);
     body+=dayTableRate(A.byDay,B.byDay);
   }
-  if(spec.memberId){ const m=DB.members.find(x=>x.id===spec.memberId); if(m && m.role==='closer' && m.commission){ const s=sumMember(m.id,P.start,P.end); const cash=s.cash_nuevo||0; const pay=Math.round(m.commission/100*cash); body+=`<div class="dsec"><div class="dh">A cobrar (comisión ${m.commission}%)</div><div class="formula"><span class="ftok"><b>${money(cash)}</b>cash</span><span class="fop">×</span><span class="ftok"><b>${m.commission}%</b></span><span class="fop">=</span><span class="ftok tot"><b>${money(pay)}</b></span></div></div>`; } }
+  if(spec.memberId){ const m=DB.members.find(x=>x.id===spec.memberId); if(m && m.role==='closer' && m.commission){
+    let baseVal, baseHtml;
+    if((DB.team.commission_base||'contador')==='cobrado'){
+      const b=closerPayoutBase(m.id,P.start,P.end); baseVal=b.base;
+      baseHtml=`<span class="ftok"><b>${money(b.front)}</b>front</span><span class="fop">+</span><span class="ftok"><b>${money(b.back)}</b>back</span>`;
+    } else {
+      const s=sumMember(m.id,P.start,P.end); baseVal=s.cash_nuevo||0;
+      baseHtml=`<span class="ftok"><b>${money(baseVal)}</b>cash</span>`;
+    }
+    const pay=Math.round(m.commission/100*baseVal);
+    body+=`<div class="dsec"><div class="dh">A cobrar (comisión ${m.commission}%)</div><div class="formula">${baseHtml}<span class="fop">×</span><span class="ftok"><b>${m.commission}%</b></span><span class="fop">=</span><span class="ftok tot"><b>${money(pay)}</b></span></div></div>`;
+  } }
   return `<div class="drill-head"><div><div class="eyebrow">${esc(P.label)}</div><h3>${esc(spec.label)}</h3></div><div class="drill-val">${headline}</div></div><p class="drill-def">${esc(spec.def||'')}</p>${body}`;
 }
 function openDrill(spec){
@@ -1037,7 +1048,24 @@ window.tblEdit=(el)=>{
 };
 
 // ---------- Equipo ----------
-function closerPayout(m){ const r=range('month', parseD(todayStr())); const s=sumMember(m.id, r.start, r.end); return Math.round((m.commission||0)/100 * (s.cash_nuevo||0)); }
+// Base "cobrado": front = cash+reserva de SUS ventas del rango (por fecha de venta);
+// back = cuotas de sus ventas COBRADAS en el rango (por fecha real de cobro, monto real).
+function closerPayoutBase(memberId, start, end){
+  const front=DB.sales.filter(s=>s.closer===memberId && s.date>=start && s.date<=end)
+    .reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const mySales=new Set(DB.sales.filter(s=>s.closer===memberId).map(s=>s.id));
+  const back=(DB.cuotas||[]).filter(c=>c.status==='pagada' && c.paid_date && c.paid_date>=start && c.paid_date<=end && mySales.has(c.sale_id))
+    .reduce((a,c)=>a+(+c.paid_amount||0),0);
+  return {front, back, base:front+back};
+}
+function closerPayout(m){
+  const r=range('month', parseD(todayStr()));
+  if((DB.team.commission_base||'contador')==='cobrado'){
+    return Math.round((m.commission||0)/100 * closerPayoutBase(m.id, r.start, r.end).base);
+  }
+  const s=sumMember(m.id, r.start, r.end);
+  return Math.round((m.commission||0)/100 * (s.cash_nuevo||0));
+}
 
 // ---------- Integración HighLevel ----------
 // Estado de la conexión GHL de la org (null = todavía no se consultó a la API).
@@ -1942,6 +1970,11 @@ function renderTeam(){
         <div class="field"><label>Nombre de la agencia</label><input class="inp" value="${esc(DB.team.name)}" onchange="setAgName(this.value)" ${ro?'disabled':''}></div>
         <div class="field"><label>Configuración de equipo</label><select class="inp" onchange="setMode(this.value)" ${ro?'disabled':''}>${modeOpts}</select></div>
         <div class="field"><label>Zona horaria ${info('Define cuál es "hoy" y cómo se cortan los días de los roll-ups.')}</label><select class="inp" onchange="setTz(this.value)" ${ro?'disabled':''}>${tzOpts}</select></div>
+        <div class="field"><label>Base de comisiones ${info('Contador: % sobre el cash que carga el closer en Cargar día. Cobrado: % sobre lo que entró de verdad — cash y reservas de sus ventas más cuotas cobradas (por fecha de cobro).')}</label>
+          <select class="inp" onchange="setCommissionBase(this.value)" ${ro?'disabled':''}>
+            <option value="contador" ${(DB.team.commission_base||'contador')==='contador'?'selected':''}>Contador manual (como siempre)</option>
+            <option value="cobrado" ${(DB.team.commission_base||'contador')==='cobrado'?'selected':''}>Sobre lo cobrado (ventas + cuotas)</option>
+          </select></div>
       </div>
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
@@ -1953,6 +1986,7 @@ window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
 window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
 window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
 window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+window.setCommissionBase=(v)=>{ if(!IS_ADMIN) return; DB.team.commission_base=(v==='cobrado')?'cobrado':'contador'; save(); toast('Base de comisiones guardada'); renderTeam(); };
 window.setCommission=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.commission=Math.max(0,Math.min(100,+v||0)); save(); const el=document.getElementById('pay_'+id); if(el) el.textContent=money(closerPayout(m)); toast('Comisión guardada'); };
 window.editMemberData=(id)=>{ state.tblMember=id; state.tblRef=todayStr(); go('table'); };
 window.addMember=async ()=>{
