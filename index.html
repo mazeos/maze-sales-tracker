@@ -213,6 +213,9 @@
   .ghl-ok{color:var(--lime-ink);font-weight:700;font-size:15px}
 
   .section{margin-bottom:22px}
+  .cuo-est{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:rgba(127,127,127,.14);color:var(--muted);white-space:nowrap}
+  .cuo-est.venc{background:rgba(255,77,77,.14);color:#ff6b6b}
+  .cuo-est.paga{background:rgba(74,222,128,.14);color:#4ade80}
   .section .eyebrow{margin-bottom:12px}
   .cards-mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
   .mini{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 15px}
@@ -357,6 +360,7 @@
     </div>
     <div class="nav-i" data-view="dashboard" title="Panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span class="tt">Panel</span></div>
     <div class="nav-i" data-view="sales" title="Ventas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v19M16.5 6.8c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3 2 2.7 4.5 3.2 4.5 1.5 4.5 3.2-2 3-4.5 3-4.5-1.3-4.5-3"/></svg><span class="tt">Ventas</span></div>
+    <div class="nav-i" data-view="caja" title="Caja"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M16 15.5h2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7"/></svg><span class="tt">Caja</span></div>
     <div class="nav-i" data-view="capture" title="Cargar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="tt">Cargar día</span></div>
     <div class="nav-i" data-view="table" title="Tabla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15"/></svg><span class="tt">Tabla (día por día)</span></div>
     <div class="nav-i" data-view="goals" title="Metas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="tt">Metas</span></div>
@@ -456,11 +460,13 @@ async function loadFromSupabase(){
   const ents=(await sb.from('st_entries').select('*').eq('org_id',ME.org_id)).data||[];
   const goalRow=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).eq('period','week').maybeSingle()).data;
   const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
+  const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz},
       members:profs.filter(p=>p.role!=='admin' && p.active!==false).sort((a,b)=>order[a.role]-order[b.role]).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
       entries:{}, goals:{week:(goalRow&&goalRow.goals)||{}},
-      sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente}))};
+      sales:sales.map(s=>({id:s.id,date:s.sale_date,cliente:s.cliente,programa:s.programa,metodo:s.metodo,facturado:+s.facturado,cash:+s.cash,cuotas:s.cuotas,reserva:+s.reserva,closer:s.closer_id,triage:s.triage_id,setter:s.setter_id,fuente:s.fuente,ghl:s.ghl_contact_id})),
+      cuotas:cuotas.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}))};
   ents.forEach(e=>{ DB.entries[e.member_id+'|'+e.entry_date]=e.metrics||{}; });
 }
 function load(){
@@ -600,6 +606,7 @@ function render(){
   else if(state.view==='team') renderTeam();
   else if(state.view==='goals') renderGoals();
   else if(state.view==='sales') renderSales();
+  else if(state.view==='caja') renderCaja();
   else if(state.view==='platform') renderPlatform();
   window.scrollTo(0,0);
 }
@@ -2113,7 +2120,83 @@ window.addSale=async()=>{
   }
   renderSales();
 };
-window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); renderSales(); };
+window.delSale=async(id)=>{ const {error}=await sb.from('st_sales').delete().eq('id',id); if(error){ toast('No se pudo'); return; } DB.sales=DB.sales.filter(s=>s.id!==id); DB.cuotas=(DB.cuotas||[]).filter(c=>c.sale_id!==id); renderSales(); };
+
+// ---------- Caja (cash del front + cuotas del back) ----------
+let GHL_LOC=null, GHL_LOC_ASKED=false;
+// El endpoint es solo-admin; para no-admins no hay link (la vista es solo-lectura).
+async function loadGhlLocation(){
+  if(GHL_LOC_ASKED||!IS_ADMIN) return;
+  GHL_LOC_ASKED=true;
+  try{
+    const {data:{session}}=await sb.auth.getSession(); if(!session) return;
+    const r=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); }
+  }catch(e){}
+}
+function moneyFull(n){ return '$'+(+n||0).toLocaleString('es'); }
+function cuotaEstado(c){ if(c.status==='pagada') return 'pagada'; return c.due_date<todayStr()?'vencida':'pendiente'; }
+function renderCaja(){
+  const cuotas=DB.cuotas||[];
+  const r=range(state.ptype, parseD(state.ref));
+  const inR=(d)=>d>=r.start&&d<=r.end;
+  const front=DB.sales.filter(s=>inR(s.date)).reduce((a,s)=>a+(+s.cash||0)+(+s.reserva||0),0);
+  const back=cuotas.filter(c=>c.status==='pagada'&&c.paid_date&&inR(c.paid_date)).reduce((a,c)=>a+(+c.paid_amount||0),0);
+  const calle=cuotas.filter(c=>c.status!=='pagada').reduce((a,c)=>a+(+c.monto||0),0);
+  const today=parseD(todayStr());
+  let proj='';
+  for(let k=0;k<3;k++){
+    const m0=new Date(today.getFullYear(),today.getMonth()+k,1), m1=new Date(today.getFullYear(),today.getMonth()+k+1,0);
+    const a=dstr(m0), b=dstr(m1);
+    const tot=cuotas.filter(c=>c.status!=='pagada'&&c.due_date>=a&&c.due_date<=b).reduce((x,c)=>x+(+c.monto||0),0);
+    proj+=mini(MONTHS[m0.getMonth()]+' '+m0.getFullYear(), moneyFull(tot));
+  }
+  const saleOf=(id)=>DB.sales.find(s=>s.id===id)||{};
+  const q=(state.cajaQ||'').toLowerCase(), f=state.cajaF||'abiertas';
+  let list=cuotas.map(c=>({...c,est:cuotaEstado(c),sale:saleOf(c.sale_id)}));
+  if(f==='abiertas') list=list.filter(c=>c.est!=='pagada');
+  else if(f!=='todas') list=list.filter(c=>c.est===f);
+  if(q) list=list.filter(c=>String(c.sale.cliente||'').toLowerCase().includes(q));
+  list.sort((a,b)=>a.due_date<b.due_date?-1:1);
+  const EST={pendiente:'<span class="cuo-est">Pendiente</span>',vencida:'<span class="cuo-est venc">Vencida</span>',pagada:'<span class="cuo-est paga">Pagada</span>'};
+  let rows='';
+  list.forEach(c=>{
+    const s=c.sale;
+    const ghlBtn=(s.ghl&&GHL_LOC)
+      ?`<a class="btn ghost sm" href="https://app.mazefunnels.com/v2/location/${esc(GHL_LOC)}/contacts/detail/${esc(s.ghl)}" target="_blank" rel="noopener" title="Abrir contacto en GHL">💬</a>`
+      :(s.ghl?'':`<span style="color:var(--muted);font-size:11px">sin contacto GHL</span>`);
+    const acts=(IS_ADMIN&&c.status!=='pagada')
+      ?`<button class="btn sm" onclick="openCobrarModal('${c.id}')">Cobrar</button> <button class="btn ghost sm" onclick="openEditCuotaModal('${c.id}')" title="Editar monto o fecha">✎</button>`
+      :(c.status==='pagada'?`<span style="color:var(--muted);font-size:11px">${c.paid_date||''}</span>`:'');
+    rows+=`<tr><td style="text-align:left">${esc(s.cliente||'—')}</td><td style="text-align:left">${esc(s.programa||'—')}</td><td>${c.numero}/${Math.max(+s.cuotas||0,c.numero)}</td><td>${moneyFull(c.status==='pagada'?c.paid_amount:c.monto)}</td><td>${c.due_date}</td><td>${EST[c.est]}</td><td>${ghlBtn}</td><td>${acts}</td></tr>`;
+  });
+  if(!rows) rows=`<tr><td colspan="8" class="empty">No hay cuotas en este filtro.</td></tr>`;
+  const FL={abiertas:'Abiertas',pendiente:'Pendientes',vencida:'Vencidas',pagada:'Pagadas',todas:'Todas'};
+  const filtros=Object.keys(FL).map(x=>`<button class="chip" style="${f===x?'border-color:var(--accent,#C5FF49);color:var(--accent,#C5FF49)':''}" onclick="setCajaF('${x}')">${FL[x]}</button>`).join('');
+  VIEW.innerHTML = topbar(periodControls()) + `<div class="eyebrow">Caja</div><h2 class="view">Cash del front, cuotas del back</h2>
+    ${adminNotice()}
+    <div class="cards-mini section">
+      ${mini('Caja front '+info('Cash collected + reservas de las ventas del período (por fecha de venta).'),moneyFull(front))}
+      ${mini('Caja back '+info('Cuotas cobradas en el período (por fecha real de cobro).'),moneyFull(back))}
+      ${mini('Total período',moneyFull(front+back))}
+      ${mini('En la calle '+info('Todo lo pendiente de cobro, de todos los tiempos: cuotas pendientes + vencidas.'),moneyFull(calle))}
+    </div>
+    <div class="section"><div class="eyebrow">Proyección de cobros ${info('Lo que debería entrar según las cuotas agendadas, mes por mes.')}</div>
+      <div class="cards-mini">${proj}</div></div>
+    <div class="section"><div class="eyebrow">Cuotas</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        ${filtros}
+        <input class="inp" style="max-width:220px;margin-left:auto" placeholder="Buscar cliente…" value="${esc(state.cajaQ||'')}" oninput="setCajaQ(this.value)">
+      </div>
+      <div class="rollup"><table>
+        <thead><tr><th style="text-align:left">Cliente</th><th style="text-align:left">Programa</th><th>Cuota</th><th>Monto</th><th>Vence</th><th>Estado</th><th>GHL</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>` + footer();
+  loadGhlLocation();
+}
+window.setCajaF=(x)=>{ state.cajaF=x; renderCaja(); };
+let _cq; window.setCajaQ=(v)=>{ state.cajaQ=v; clearTimeout(_cq); _cq=setTimeout(renderCaja,250); };
 
 // ---------- util ----------
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
