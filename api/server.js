@@ -656,9 +656,14 @@ async function runShadowForOrg(orgId, dateStr) {
   try { creds = await getGhlCreds(orgId); } catch { /* sin GHL utilizable: solo KPIs internos */ }
   const calendarId = (creds && creds.integration && creds.integration.calendar_id) || GHL_CALENDAR || null;
 
+  // Miembros con rol comercial: setter/triage/closer directos, o admins que
+  // además venden (sales_role). El rol efectivo (comercial) es lo que mide el motor.
   const members = await svcGet('st_profiles?org_id=eq.' + encodeURIComponent(orgId)
-    + '&select=id,role,ghl_user_id,active&role=in.(closer,setter)');
-  const activos = members.filter((m) => m.active !== false);
+    + '&select=id,role,sales_role,ghl_user_id,active');
+  const activos = members
+    .filter((m) => m.active !== false)
+    .map((m) => ({ ...m, role: m.role === 'admin' ? m.sales_role : m.role }))
+    .filter((m) => m.role === 'setter' || m.role === 'closer');
   const salesRows = await svcGet('st_sales?org_id=eq.' + encodeURIComponent(orgId) + '&select=id,closer_id,sale_date,cash,reserva,facturado');
   const cuotasRows = await svcGet('st_cuotas?org_id=eq.' + encodeURIComponent(orgId) + '&select=sale_id,status,paid_date,paid_amount');
   const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
