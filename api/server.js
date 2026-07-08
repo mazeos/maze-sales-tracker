@@ -108,6 +108,19 @@ function ghlHeaders(token, version = '2021-07-28') {
 
 const VALID_ROLES = ['setter', 'triage', 'closer'];
 
+// Mapa canónico modo de equipo → roles permitidos (además de 'admin', SIEMPRE válido).
+//   solo → setter | sc → setter, closer | full → setter, triage, closer
+// El import desde GHL (ghl_user_id no-null) queda EXENTO del enforcement: GHL es la
+// fuente de verdad del equipo cuando está conectado (decisión 2026-07-04). Esa exención
+// se aplica en el trigger DB (migración 016); acá el alta manual siempre tiene ghl_user_id null.
+const MODE_ROLES = { solo: ['setter'], sc: ['setter', 'closer'], full: ['setter', 'triage', 'closer'] };
+
+function roleAllowedForMode(role, mode) {
+  if (role === 'admin') return true;
+  const allowed = MODE_ROLES[mode] || MODE_ROLES.full;
+  return allowed.includes(role);
+}
+
 // ---------- Helpers de respuesta ----------
 function sendJSON(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -145,6 +158,27 @@ function svcHeaders(extra = {}) {
     'Content-Type': 'application/json',
     ...extra,
   };
+}
+
+// Lee el team_mode de una org con service key. Fail-open a 'full' ante error de red
+// (no dejamos que una lectura caída bloquee el alta/cambio; el trigger DB es el backstop).
+async function readTeamMode(orgId) {
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=team_mode',
+      { headers: svcHeaders() }
+    );
+    if (r.status !== 200) {
+      console.warn(`[api] readTeamMode org=${orgId} status=${r.status} -> fail-open full`);
+      return 'full';
+    }
+    const rows = await r.json().catch(() => null);
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    return (row && row.team_mode) || 'full';
+  } catch {
+    console.warn(`[api] readTeamMode org=${orgId} network_error -> fail-open full`);
+    return 'full';
+  }
 }
 
 // ---------- Auth: valida un JWT (y opcionalmente exige role=admin) ----------
@@ -995,6 +1029,14 @@ async function createMember(req, res, admin) {
   if (!password) return sendJSON(res, 400, { error: 'Tienes que poner una contraseña' });
   if (password.length < 8) return sendJSON(res, 400, { error: 'La contraseña tiene que tener al menos 8 caracteres' });
   if (!VALID_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage o closer' });
+
+  // Enforcement team_mode: el rol tiene que estar permitido por el modo de equipo de la org.
+  // org_id sale del perfil admin validado, NO del body (anti cross-org). El alta manual
+  // siempre tiene ghl_user_id null → nunca es la vía de import GHL (esa queda exenta).
+  const mode = await readTeamMode(admin.org_id);
+  if (!roleAllowedForMode(role, mode)) {
+    return sendJSON(res, 400, { error: 'Este rol no está disponible para el modo de equipo de tu agencia.' });
+  }
 
   // a. Crear el auth user.
   let authRes, authUser;
@@ -2194,6 +2236,15 @@ async function patchOrgMember(req, res, sa, orgId, uid) {
   const ROLES = ['admin', 'setter', 'triage', 'closer'];
   if (hasRole && !ROLES.includes(body.role)) {
     return sendJSON(res, 400, { error: 'Ese rol no es válido' });
+  }
+  // Enforcement team_mode: el super-admin no puede asignar un rol que el modo de equipo
+  // de esa org no permita. Solo aplica cuando el body trae role; el flujo de active-only
+  // no se toca. 'admin' siempre pasa (roleAllowedForMode). Fail-open a 'full' ante lectura caída.
+  if (hasRole) {
+    const mode = await readTeamMode(orgId);
+    if (!roleAllowedForMode(body.role, mode)) {
+      return sendJSON(res, 400, { error: 'Este rol no está disponible para el modo de equipo de tu agencia.' });
+    }
   }
   if (hasActive && typeof body.active !== 'boolean') {
     return sendJSON(res, 400, { error: 'El campo activo tiene que ser verdadero o falso' });

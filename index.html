@@ -430,6 +430,11 @@ const METRICS = {
   ],
 };
 const ROLE_LABEL = {setter:'Setter', triage:'Triage', closer:'Closer'};
+// Mapa modo de equipo → roles permitidos (defensa en profundidad + UX; la seguridad
+// real la dan el backend y el trigger DB). 'admin' se maneja aparte (siempre válido).
+const MODE_ROLES = {solo:['setter'], sc:['setter','closer'], full:['setter','triage','closer']};
+const allowedRoles = (mode) => MODE_ROLES[mode] || MODE_ROLES.full;
+const ROLE_MODE_MSG = 'Este rol no está disponible para el modo de equipo de tu agencia.';
 const MONTHS=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
 // ---------- Data layer ----------
@@ -1726,6 +1731,10 @@ function orgPanelHtml(){
   } else {
     list=PLAT_MEMBERS.map((m,idx)=>{
       // Options con valores de un array literal fijo (jamás datos de usuario).
+      // NOTA: el team_mode de la org gestionada NO está en el scope de este panel
+      // (el listado /api/orgs solo trae id,name,created_at), así que el select no se
+      // filtra por modo acá. La seguridad real la dan patchOrgMember + el trigger DB:
+      // si el super-admin elige un rol no permitido, la API responde 400.
       const roleSel=`<select class="inp" style="width:auto" onchange="changeMemberRole(${idx}, this.value)">${['admin','setter','triage','closer'].map(r=>`<option value="${r}"${m.role===r?' selected':''}>${r}</option>`).join('')}</select>`;
       const actBtn=(m.active!==false)
         ? `<button class="btn ghost sm" onclick="toggleMemberActive(${idx})">Desactivar</button>`
@@ -1965,7 +1974,9 @@ function renderTeam(){
     .map(([v,l])=>`<option value="${v}" ${DB.team.mode===v?'selected':''}>${l}</option>`).join('');
   const tz=(DB.team.tz)||'America/Argentina/Buenos_Aires';
   const tzOpts=TZS.map(([v,l])=>`<option value="${v}" ${tz===v?'selected':''}>${l}</option>`).join('');
-  const roleOpts=(sel)=>['setter','triage','closer'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
+  // Opciones filtradas por el modo de la org. Si el rol actual (sel) es legacy-inválido
+  // para el modo vigente, lo incluimos igual (selected) para no forzar el cambio ni romper el select.
+  const roleOpts=(sel)=>{ const rs=allowedRoles(DB.team.mode).slice(); if(sel && !rs.includes(sel)) rs.push(sel); return rs.map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]||r}</option>`).join(''); };
   let list='';
   // Admins primero (dueños del equipo). Pueden tener un rol comercial opcional
   // (dueño que también vende): si lo tienen, además operan como ese rol.
@@ -2005,7 +2016,7 @@ function renderTeam(){
   const addMemberForm=`<div class="section"><div class="eyebrow">Agregar miembro</div>
       <div class="grid2">
         <div class="field"><label>Nombre</label><input class="inp" id="newName" placeholder="Ej: Facu"></div>
-        <div class="field"><label>Rol</label><select class="inp" id="newRole"><option value="setter">Setter</option><option value="triage">Triage</option><option value="closer">Closer</option></select></div>
+        <div class="field"><label>Rol</label><select class="inp" id="newRole">${allowedRoles(DB.team.mode).map(r=>`<option value="${r}">${ROLE_LABEL[r]||r}</option>`).join('')}</select></div>
         <div class="field"><label>Email</label><input class="inp" id="newEmail" type="email" placeholder="persona@email.com"></div>
         <div class="field"><label>Contraseña temporal</label><input class="inp" id="newPass" type="text" placeholder="mínimo 8 caracteres"></div>
       </div>
@@ -2129,7 +2140,10 @@ window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').tri
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
 window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
 window.setMemberName=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; const nn=(v||'').trim(); if(nn) m.name=nn; save(); toast('Nombre actualizado'); };
-window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return; m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
+window.setMemberRole=(id,v)=>{ if(!IS_ADMIN) return; const m=DB.members.find(x=>x.id===id); if(!m) return;
+  // Guarda: si el rol cambia HACIA uno no permitido por el modo, revertir sin persistir.
+  if(v!==m.role && !allowedRoles(DB.team.mode).includes(v)){ toast(ROLE_MODE_MSG); renderTeam(); return; }
+  m.role=v; if(v!=='closer') delete m.commission; save(); renderTeam(); };
 // Rol comercial de un admin (opcional). Persiste directo en st_profiles.sales_role
 // y recarga para que el embudo/atribución lo tomen como ese rol.
 window.setSalesRole=async(id,v)=>{ if(!IS_ADMIN) return; const val=['setter','triage','closer'].includes(v)?v:null; const {error}=await sb.from('st_profiles').update({sales_role:val}).eq('id',id); if(error){ toast('No se pudo guardar'); return; } await loadFromSupabase(); toast('Rol comercial guardado'); renderTeam(); };
@@ -2146,6 +2160,7 @@ window.addMember=async ()=>{
   if(!email){ toast('Tienes que poner un email'); return; }
   if(!password){ toast('Tienes que poner una contraseña'); return; }
   if(password.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
+  if(!allowedRoles(DB.team.mode).includes(role)){ toast(ROLE_MODE_MSG); return; }
   const { data:{ session } } = await sb.auth.getSession();
   if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
   let res, data;
