@@ -49,7 +49,7 @@ const WA_TYPES = new Set(['TYPE_WHATSAPP', 'TYPE_SMS', 'TYPE_CUSTOM_SMS']);
 const TK_TYPES = new Set(['TYPE_TIKTOK']);
 
 export async function computeMemberKpis(ctx) {
-  const { ghlBase, token, locationId, calendarId, tz, date, member, salesRows, cuotasRows, bookingDomains } = ctx;
+  const { ghlBase, token, locationId, calendarId, tz, date, member, salesRows, cuotasRows, bookingDomains, agendaCalendarIds } = ctx;
   const range = tzDayRange(date, tz);
   const inDay = (iso) => { const t = new Date(iso).getTime(); return t >= range.start && t < range.end; };
   const out = {};
@@ -157,17 +157,25 @@ export async function computeMemberKpis(ctx) {
     // la ventana es un colchón hacia adelante (cita del día o de los próximos 7 días).
     // NO se filtra por assignedUserId: la cita suele quedar asignada al closer, no al setter;
     // el mecanismo de atribución es el cruce por contactId (createdBy.userId suele venir null).
-    if (linkedContacts.size && calendarId) {
+    // Calendarios de agenda del setter (multi). Fallback al calendar_id del closer
+    // si el tenant todavía no eligió agenda cals (retrocompat).
+    const agendaCals = (agendaCalendarIds && agendaCalendarIds.length)
+      ? agendaCalendarIds
+      : (calendarId ? [calendarId] : []);
+    if (linkedContacts.size && agendaCals.length) {
       const winEnd = range.start + AGENDA_WINDOW_DAYS * 86400000;
-      const ag = await ghlFetch(`${ghlBase}/calendars/events?locationId=${encodeURIComponent(locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${range.start}&endTime=${winEnd}`, H);
       // REGLA DE ORO: re-filtrar client-side por la ventana (GHL no respeta el rango del query).
       const inWin = (iso) => { const t = new Date(iso).getTime(); return t >= range.start && t < winEnd; };
-      for (const e of (ag.events || [])) {
-        if (e.deleted || !inWin(e.startTime)) continue;
-        const canal = linkedContacts.get(e.contactId);
-        if (!canal) continue;
-        if (canal === 'ig') out.agend_ig++; else out.agend_wpp++;
-        linkedContacts.delete(e.contactId); // una agenda por contacto linkeado
+      for (const calId of agendaCals) {
+        if (!linkedContacts.size) break; // ya no quedan contactos por atribuir
+        const ag = await ghlFetch(`${ghlBase}/calendars/events?locationId=${encodeURIComponent(locationId)}&calendarId=${encodeURIComponent(calId)}&startTime=${range.start}&endTime=${winEnd}`, H);
+        for (const e of (ag.events || [])) {
+          if (e.deleted || !inWin(e.startTime)) continue;
+          const canal = linkedContacts.get(e.contactId);
+          if (!canal) continue;
+          if (canal === 'ig') out.agend_ig++; else out.agend_wpp++;
+          linkedContacts.delete(e.contactId); // una agenda por contacto linkeado (en cualquier calendario)
+        }
       }
     }
   }
