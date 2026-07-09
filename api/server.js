@@ -702,6 +702,7 @@ async function runShadowForOrg(orgId, dateStr) {
   const cuotasRows = await svcGet('st_cuotas?org_id=eq.' + encodeURIComponent(orgId) + '&select=sale_id,status,paid_date,paid_amount');
   const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
   const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
+  const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
 
   const rows = [];
   for (const m of activos) {
@@ -709,7 +710,7 @@ async function runShadowForOrg(orgId, dateStr) {
     try {
       kpis = await computeMemberKpis({
         ghlBase: GHL_BASE, token: creds ? creds.token : null, locationId: creds ? creds.locationId : null,
-        calendarId: creds ? calendarId : null, tz, date, member: m, salesRows, cuotasRows, bookingDomains,
+        calendarId: creds ? calendarId : null, tz, date, member: m, salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
       });
     } catch (e) {
       console.warn('[shadow] member', m.id, 'falló:', e.message);
