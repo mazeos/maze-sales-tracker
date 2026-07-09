@@ -29,11 +29,18 @@ async function ghlFetch(url, headers) {
   return res.json().catch(() => ({}));
 }
 
-function kpisCitas(events, userId, { start, end }, prevShowedContacts) {
+function kpisCitas(events, userId, { start, end }, prevShowedContacts, bump) {
   const inDay = (iso) => { const t = new Date(iso).getTime(); return t >= start && t < end; };
   const evs = events.filter((e) => !e.deleted && e.assignedUserId === userId && inDay(e.startTime));
   const st = (e) => String(e.appointmentStatus || '').toLowerCase();
   const validas = evs.filter((e) => !['cancelled', 'invalid'].includes(st(e)));
+  for (const e of validas) {
+    bump('llamadas', e.contactId);
+    if (st(e) === 'showed') bump('asistencias', e.contactId);
+    if (st(e) === 'noshow') bump('no_shows', e.contactId);
+    if (prevShowedContacts.has(e.contactId)) bump('segundas', e.contactId);
+  }
+  for (const e of evs.filter((e) => st(e) === 'cancelled')) bump('cancelados', e.contactId);
   return {
     llamadas: validas.length,
     asistencias: validas.filter((e) => st(e) === 'showed').length,
@@ -54,6 +61,20 @@ export async function computeMemberKpis(ctx) {
   const inDay = (iso) => { const t = new Date(iso).getTime(); return t >= range.start && t < range.end; };
   const out = {};
 
+  // Desglose de contactos por KPI: kpi -> Map(contactId -> count). Se puebla en
+  // paralelo a los conteos de `out` y se resuelve a nombres al final.
+  const contactsByKpi = {};
+  const bump = (kpi, contactId) => {
+    if (!contactId) return;
+    const m = contactsByKpi[kpi] || (contactsByKpi[kpi] = new Map());
+    m.set(contactId, (m.get(contactId) || 0) + 1);
+  };
+  const contactNames = new Map(); // contactId -> nombre (cache de los ya traídos)
+  const nombreDe = (cc) => {
+    const w = [cc.firstName, cc.lastName].filter(Boolean).join(' ').trim();
+    return w || cc.email || cc.phone || 'Sin nombre';
+  };
+
   // ---------- Ventas y cuotas (fuente: el propio tracker, filas ya provistas) ----------
   if (member.role === 'closer') {
     const mySales = salesRows.filter((s) => s.closer_id === member.id && s.sale_date === date);
@@ -67,7 +88,7 @@ export async function computeMemberKpis(ctx) {
       .reduce((a, c) => a + (+c.paid_amount || 0), 0);
   }
 
-  if (!member.ghl_user_id || !token) return out; // sin vínculo GHL: solo KPIs internos
+  if (!member.ghl_user_id || !token) return { values: out, contacts: {} }; // sin vínculo GHL: solo KPIs internos
   const H = { Authorization: 'Bearer ' + token, Version: '2021-04-15', Accept: 'application/json' };
 
   // ---------- Citas (closer) ----------
@@ -77,7 +98,7 @@ export async function computeMemberKpis(ctx) {
     const prevShowed = new Set((prevEv.events || [])
       .filter((e) => !e.deleted && new Date(e.startTime).getTime() < range.start && String(e.appointmentStatus || '').toLowerCase() === 'showed')
       .map((e) => e.contactId));
-    Object.assign(out, kpisCitas(ev.events || [], member.ghl_user_id, range, prevShowed));
+    Object.assign(out, kpisCitas(ev.events || [], member.ghl_user_id, range, prevShowed, bump));
   }
 
   // ---------- Conversaciones (setter) ----------
@@ -122,32 +143,40 @@ export async function computeMemberKpis(ctx) {
       if (isWa) {
         const contact = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(c.contactId)}`, H);
         const cc = contact.contact || {};
+        if (c.contactId) contactNames.set(c.contactId, nombreDe(cc));
         const cf = (cc.customFields || []).find((f) => String(f.key || f.name || '').toLowerCase().includes('utm_source'));
         const src = String((cf && cf.value) || (cc.tags || []).find((t) => String(t).startsWith('origen:')) || '').toLowerCase();
         if (src.includes('tiktok')) waCanal = 'tk'; else if (src.includes('instagram')) waCanal = 'ig';
       }
       // apertura: primer mensaje histórico saliente humano y de hoy
-      if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) { if (isTk) out.outbound_tk++; else out.outbound++; }
+      if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) { if (isTk) { out.outbound_tk++; bump('outbound_tk', c.contactId); } else { out.outbound++; bump('outbound', c.contactId); } }
       // bienvenida: apertura automática (ManyChat) de hoy — solo IG (donde corre ManyChat)
-      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) out.bienvenidas++;
+      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) { out.bienvenidas++; bump('bienvenidas', c.contactId); }
       // inbound: PERSONAS (conversaciones únicas con entrante hoy)
       if (todays.some((m) => m.direction === 'inbound')) {
-        if (isIg) out.inbound_ig++;
-        if (isTk) out.inbound_tk++; // DM nativo de TikTok (TYPE_TIKTOK), separado del WhatsApp-de-TikTok
-        if (isWa) { if (waCanal === 'tk') out.inbound_wpp_tk++; else if (waCanal === 'ig') out.inbound_wpp_ig++; else out.inbound_wpp_sin_canal++; }
+        if (isIg) { out.inbound_ig++; bump('inbound_ig', c.contactId); }
+        if (isTk) { out.inbound_tk++; bump('inbound_tk', c.contactId); } // DM nativo de TikTok (TYPE_TIKTOK), separado del WhatsApp-de-TikTok
+        if (isWa) {
+          if (waCanal === 'tk') { out.inbound_wpp_tk++; bump('inbound_wpp_tk', c.contactId); }
+          else if (waCanal === 'ig') { out.inbound_wpp_ig++; bump('inbound_wpp_ig', c.contactId); }
+          else { out.inbound_wpp_sin_canal++; bump('inbound_wpp_sin_canal', c.contactId); }
+        }
       }
       // respuestas: entrante de hoy posterior a un saliente humano previo
       const outTimes = msgs.filter(humanOut).map((m) => new Date(m.dateAdded).getTime());
-      if (todays.some((m) => m.direction === 'inbound' && outTimes.some((t) => t < new Date(m.dateAdded).getTime()))) { if (isTk) out.resp_tk++; else out.respuestas++; }
+      if (todays.some((m) => m.direction === 'inbound' && outTimes.some((t) => t < new Date(m.dateAdded).getTime()))) { if (isTk) { out.resp_tk++; bump('resp_tk', c.contactId); } else { out.respuestas++; bump('respuestas', c.contactId); } }
       // seguimiento: saliente humano de hoy en conversación que NO abrió hoy
       if (!inDay(msgs[0].dateAdded) && todays.some(humanOut)) {
-        if (isIg) out.seg_ig++; else if (isWa) out.seg_wpp++; else if (isTk) out.seg_tk++;
+        if (isIg) { out.seg_ig++; bump('seg_ig', c.contactId); } else if (isWa) { out.seg_wpp++; bump('seg_wpp', c.contactId); } else if (isTk) { out.seg_tk++; bump('seg_tk', c.contactId); }
       }
       // links de agenda enviados hoy (content-match del dominio de la org)
       if (domRe) {
         const n = todays.filter((m) => humanOut(m) && domRe.test(m.body || '')).length;
         if (isIg) out.links_ig += n; else if (isWa) out.links_wpp += n;
-        if (n > 0 && (isIg || isWa)) linkedContacts.set(c.contactId, isIg ? 'ig' : 'wpp');
+        if (n > 0 && (isIg || isWa)) {
+          linkedContacts.set(c.contactId, isIg ? 'ig' : 'wpp');
+          for (let k = 0; k < n; k++) bump(isIg ? 'links_ig' : 'links_wpp', c.contactId); // count = nº de links
+        }
       }
     }
 
@@ -173,12 +202,26 @@ export async function computeMemberKpis(ctx) {
           if (e.deleted || !inWin(e.startTime)) continue;
           const canal = linkedContacts.get(e.contactId);
           if (!canal) continue;
-          if (canal === 'ig') out.agend_ig++; else out.agend_wpp++;
+          if (canal === 'ig') { out.agend_ig++; bump('agend_ig', e.contactId); } else { out.agend_wpp++; bump('agend_wpp', e.contactId); }
           linkedContacts.delete(e.contactId); // una agenda por contacto linkeado (en cualquier calendario)
         }
       }
     }
   }
 
-  return out;
+  // Resolver nombres de los contactos únicos que aún no tenemos cacheados.
+  const faltan = new Set();
+  for (const m of Object.values(contactsByKpi)) for (const id of m.keys()) if (!contactNames.has(id)) faltan.add(id);
+  for (const id of faltan) {
+    const cr = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(id)}`, H);
+    contactNames.set(id, nombreDe(cr.contact || {}));
+  }
+  const contacts = {};
+  for (const [kpi, m] of Object.entries(contactsByKpi)) {
+    contacts[kpi] = [...m.entries()].map(([id, count]) => {
+      const base = { id, name: contactNames.get(id) || 'Sin nombre' };
+      return count > 1 ? { ...base, count } : base;
+    });
+  }
+  return { values: out, contacts };
 }
