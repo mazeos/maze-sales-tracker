@@ -1171,6 +1171,29 @@ function ghlCalendarBlock(){
   return `<div style="border-top:1px solid var(--line);padding-top:12px;margin:0 0 12px">
     <b style="font-size:13px;display:block;margin:0 0 6px">Calendario de llamadas</b>${inner}</div>`;
 }
+// Sub-bloque "Calendarios de agenda del setter" (multi, checkboxes). Reusa la
+// misma lista de calendarios que ya trae ghlCalendarBlock (GHL_CALS).
+function ghlAgendaCalendarsBlock(){
+  let inner='';
+  if(GHL_CALS===null){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando calendarios…</p>`;
+  } else if(GHL_CALS.error){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.msg||'No se pudieron cargar los calendarios. Recargá la página para reintentar.')}</p>`;
+  } else if(!(GHL_CALS.calendars||[]).length){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.hint||'Importá primero a tus closers desde Equipo desde HighLevel')}</p>`;
+  } else {
+    const marcados=new Set(GHL_CALS.agenda_calendar_ids||[]);
+    const items=GHL_CALS.calendars.map(c=>`<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;padding:2px 0">
+      <input type="checkbox" class="ghl-agenda-cal" value="${esc(c.id)}" ${marcados.has(c.id)?'checked':''}>
+      <span>${esc(c.name)}${(c.closers&&c.closers.length)?` <span style="color:var(--muted)">· ${esc(c.closers.join(', '))}</span>`:''}</span>
+    </label>`).join('');
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0 0 8px">Marcá los calendarios donde tus setters agendan llamadas — sus citas cuentan como agendas.</p>
+      <div style="display:flex;flex-direction:column;gap:2px;margin:0 0 8px">${items}</div>
+      <button class="btn sm" onclick="saveGhlAgendaCalendars()">Guardar calendarios de agenda</button>`;
+  }
+  return `<div style="border-top:1px solid var(--line);padding-top:12px;margin:0 0 12px">
+    <b style="font-size:13px;display:block;margin:0 0 6px">Calendarios de agenda del setter</b>${inner}</div>`;
+}
 function ghlCard(){
   if(!IS_ADMIN) return '';
   let body='';
@@ -1183,6 +1206,7 @@ function ghlCard(){
     const fecha=GHL_STATUS.connected_at ? new Date(GHL_STATUS.connected_at).toLocaleDateString('es-AR',{day:'numeric',month:'short',year:'numeric'}) : '';
     body=`<p style="font-size:13.5px;margin:0 0 12px">✅ Conectado a <b>${esc(GHL_STATUS.location_name||GHL_STATUS.location_id||'tu subcuenta')}</b>${fecha?` <span style="color:var(--muted)">· desde el ${fecha}</span>`:''}</p>
       ${ghlCalendarBlock()}
+      ${ghlAgendaCalendarsBlock()}
       <button class="btn danger sm" onclick="disconnectGhl()">Desconectar</button>`;
   } else if(GHL_STATUS.pending){
     // Subcuenta pre-asignada desde Plataforma: falta que el admin autorice el OAuth.
@@ -1238,6 +1262,29 @@ window.saveGhlCalendar=async ()=>{
     renderTeam();
   } else {
     toast(data.error || 'No se pudo guardar el calendario');
+  }
+};
+window.saveGhlAgendaCalendars=async ()=>{
+  if(!IS_ADMIN) return;
+  const ids=[...document.querySelectorAll('.ghl-agenda-cal:checked')].map(el=>el.value);
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
+  let res, data;
+  try{
+    res=await fetch('/api/integrations/ghl/agenda-calendars',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+session.access_token,'Content-Type':'application/json'},
+      body:JSON.stringify({calendar_ids: ids}),
+    });
+    data=await res.json().catch(()=>({}));
+  }catch(e){ toast('No se pudo conectar con el servidor'); return; }
+  if(res.ok){
+    if(GHL_CALS && !GHL_CALS.error){ GHL_CALS.agenda_calendar_ids=(data.agenda_calendar_ids||ids); }
+    SHADOW=null; // la próxima corrida usará los calendarios nuevos
+    toast(ids.length ? 'Calendarios de agenda guardados' : 'Sin calendarios de agenda');
+    renderTeam();
+  } else {
+    toast(data.error || 'No se pudieron guardar los calendarios de agenda');
   }
 };
 
@@ -2140,7 +2187,9 @@ window.runShadow=async()=>{
 window.setBookingDomains=async(v)=>{
   if(!IS_ADMIN) return;
   const domains=v.split(',').map(s=>s.trim()).filter(Boolean);
-  const {error}=await sb.from('st_kpi_config').upsert({org_id:ME.org_id,kpi:'_config',config:{booking_domains:domains}},{onConflict:'org_id,kpi'});
+  // Merge: no pisar el resto de _config (agenda_calendar_ids, etc.).
+  const cur=((KPI_CFG||[]).find(k=>k.kpi==='_config')||{}).config||{};
+  const {error}=await sb.from('st_kpi_config').upsert({org_id:ME.org_id,kpi:'_config',config:{...cur,booking_domains:domains}},{onConflict:'org_id,kpi'});
   toast(error?'No se pudo guardar':'Dominios guardados'); KPI_CFG=null; SHADOW=null; renderTeam();
 };
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
