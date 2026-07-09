@@ -429,12 +429,14 @@ async function deletePlatformSetting(key) {
 
 // Refresca el access_token de GHL si está por vencer (a menos de 5 min).
 // Queda listo para las fases siguientes de sync; hoy ninguna ruta crítica lo consume.
-async function refreshGhlToken(integration) {
+async function refreshGhlToken(integration, force = false) {
   // Guard defensivo: una fila pre-vinculada (pending) no tiene tokens — jamás
   // postear refresh_token: undefined a GHL.
   if (!integration.refresh_token) throw new Error('Integración sin tokens (pendiente de autorizar)');
   const expiresAt = integration.token_expires_at ? new Date(integration.token_expires_at).getTime() : 0;
-  if (expiresAt - Date.now() >= 5 * 60 * 1000) {
+  // `force` (usado tras un 401) salta el chequeo de tiempo: el token dice estar
+  // vigente por fecha pero GHL lo rechazó, así que hay que refrescar igual.
+  if (!force && expiresAt - Date.now() >= 5 * 60 * 1000) {
     return integration.access_token; // todavía sirve, no hace falta refresh
   }
 
@@ -497,6 +499,29 @@ async function getGhlCreds(orgId) {
   return null;
 }
 
+// ---------- Llamada a GHL con auto-recuperación ante 401 ----------
+// Envuelve un fetch a la API de GHL: si el token vigente es rechazado (401 —
+// típico de un token revocado o restaurado con fecha válida pero contenido
+// inválido), fuerza un refresh y reintenta UNA sola vez. `doFetch(token)` debe
+// construir y ejecutar el fetch con el token que recibe. Solo aplica a
+// integraciones OAuth (creds.integration); en modo PIT no hay refresh token, se
+// devuelve la respuesta tal cual. Muta creds.token con el valor refrescado para
+// que los usos posteriores del mismo creds ya usen el token nuevo.
+async function ghlWithRetry(creds, doFetch) {
+  let resp = await doFetch(creds.token);
+  if (resp.status === 401 && creds && creds.integration) {
+    try {
+      const fresh = await refreshGhlToken(creds.integration, true);
+      creds.token = fresh;
+      resp = await doFetch(fresh);
+    } catch (e) {
+      console.error(`[api] ghlWithRetry refresh_on_401 fail org=${creds.integration.org_id}: ${e.message}`);
+      // Devolver la 401 original: el caller ya la maneja (502/error de UI).
+    }
+  }
+  return resp;
+}
+
 // ---------- GET /api/ghl/leads ----------
 // Leads con cita en el calendario de llamadas (últimos 14 días + próximos 7)
 // para asociar la venta. El calendario se resuelve POR ORG: el elegido en
@@ -524,10 +549,10 @@ async function ghlLeads(req, res, member) {
   let events = [];
   try {
     const start = now - 14 * 86400000, end = now + 7 * 86400000;
-    const evRes = await fetch(
+    const evRes = await ghlWithRetry(creds, (t) => fetch(
       `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${start}&endTime=${end}`,
-      { headers: ghlHeaders(creds.token, '2021-04-15') }
-    );
+      { headers: ghlHeaders(t, '2021-04-15') }
+    ));
     const ev = await evRes.json().catch(() => ({}));
     events = ev.events || [];
   } catch {
@@ -547,7 +572,7 @@ async function ghlLeads(req, res, member) {
   const leads = [];
   for (const [cid, e] of byContact) {
     try {
-      const cRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(cid)}`, { headers: ghlHeaders(creds.token) });
+      const cRes = await ghlWithRetry(creds, (t) => fetch(`${GHL_BASE}/contacts/${encodeURIComponent(cid)}`, { headers: ghlHeaders(t) }));
       const c = (await cRes.json().catch(() => ({}))).contact || {};
       leads.push({
         id: cid,
@@ -628,10 +653,10 @@ async function captureGhl(req, res, member, url) {
     let events = [];
     try {
       const { start, end } = tzDayRange(date, tz);
-      const evRes = await fetch(
+      const evRes = await ghlWithRetry(creds, (t) => fetch(
         `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${start}&endTime=${end}`,
-        { headers: ghlHeaders(creds.token, '2021-04-15') }
-      );
+        { headers: ghlHeaders(t, '2021-04-15') }
+      ));
       const ev = await evRes.json().catch(() => ({}));
       events = ev.events || [];
     } catch {
@@ -792,10 +817,10 @@ async function listOrgCalendars(creds, orgId) {
   if (closerByGhlId.size === 0) return { calendars: [], sinClosers: true };
 
   // c. Calendarios de la subcuenta (misma versión de API que los events).
-  const calRes = await fetch(
+  const calRes = await ghlWithRetry(creds, (t) => fetch(
     GHL_BASE + '/calendars/?locationId=' + encodeURIComponent(creds.locationId),
-    { headers: ghlHeaders(creds.token, '2021-04-15') }
-  );
+    { headers: ghlHeaders(t, '2021-04-15') }
+  ));
   if (calRes.status < 200 || calRes.status >= 300) {
     console.error(`[api] listOrgCalendars org=${orgId} ghl_fail status=${calRes.status}`);
     throw new Error('No se pudo hablar con HighLevel');
@@ -1019,9 +1044,9 @@ async function salesGhl(req, res, member) {
     push(GHL_CF.fueReserva, fueReserva ? 'Si' : 'No');
     if (fueReserva) push(GHL_CF.montoReserva, b.reserva);
     try {
-      const upRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}`, {
-        method: 'PUT', headers: ghlHeaders(creds.token), body: JSON.stringify({ customFields: cf }),
-      });
+      const upRes = await ghlWithRetry(creds, (t) => fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+        method: 'PUT', headers: ghlHeaders(t), body: JSON.stringify({ customFields: cf }),
+      }));
       result.customFields = upRes.status >= 200 && upRes.status < 300;
     } catch { /* best-effort, se reporta en result */ }
   }
@@ -1029,17 +1054,17 @@ async function salesGhl(req, res, member) {
   // b. Tag disparador del onboarding (venta-cerrada) o del seguimiento de seña (reserva).
   const tag = fueReserva ? 'reserva' : 'venta-cerrada';
   try {
-    const tagRes = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/tags`, {
-      method: 'POST', headers: ghlHeaders(creds.token), body: JSON.stringify({ tags: [tag] }),
-    });
+    const tagRes = await ghlWithRetry(creds, (t) => fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/tags`, {
+      method: 'POST', headers: ghlHeaders(t), body: JSON.stringify({ tags: [tag] }),
+    }));
     result.tag = tagRes.status >= 200 && tagRes.status < 300;
   } catch { /* idem */ }
 
   // c. Oportunidad en el pipeline de onboarding (se saltea si GHL_PIPELINE no está configurado).
   if (GHL_PIPELINE && GHL_PIPELINE.pipelineId) {
     try {
-      const oppRes = await fetch(`${GHL_BASE}/opportunities/`, {
-        method: 'POST', headers: ghlHeaders(creds.token),
+      const oppRes = await ghlWithRetry(creds, (t) => fetch(`${GHL_BASE}/opportunities/`, {
+        method: 'POST', headers: ghlHeaders(t),
         body: JSON.stringify({
           locationId: creds.locationId,
           pipelineId: GHL_PIPELINE.pipelineId,
@@ -1049,7 +1074,7 @@ async function salesGhl(req, res, member) {
           status: 'open',
           monetaryValue: +b.facturado || 0,
         }),
-      });
+      }));
       result.opportunity = oppRes.status >= 200 && oppRes.status < 300;
     } catch { /* best-effort */ }
   }
@@ -1388,10 +1413,11 @@ async function disconnectGhl(req, res, admin) {
 // "no están en GHL"). Lanza Error si no se pudo hablar con HighLevel.
 async function fetchGhlUsers(integration) {
   const token = await refreshGhlToken(integration); // lanza si el refresh falla
-  const r = await fetch(
+  const creds = { token, integration }; // para el retry-on-401 del helper compartido
+  const r = await ghlWithRetry(creds, (t) => fetch(
     'https://services.leadconnectorhq.com/users/?locationId=' + encodeURIComponent(integration.location_id),
-    { headers: { 'Authorization': 'Bearer ' + token, 'Version': '2021-07-28' } }
-  );
+    { headers: { 'Authorization': 'Bearer ' + t, 'Version': '2021-07-28' } }
+  ));
   if (r.status < 200 || r.status >= 300) {
     console.error(`[api] fetchGhlUsers org=${integration.org_id} fail status=${r.status}`);
     throw new Error('No se pudo hablar con HighLevel');
