@@ -838,10 +838,18 @@ async function listGhlCalendars(req, res, admin) {
     return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
   }
 
+  // Calendarios de agenda del setter ya guardados (para que la UI marque los checkboxes).
+  let agendaCalendarIds = [];
+  try {
+    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(admin.org_id) + '&kpi=eq._config&select=config');
+    agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
+  } catch { /* best-effort: si falla, la UI arranca sin marcados */ }
+
   const out = {
     calendars: listado.calendars,
     selected: (creds.integration && creds.integration.calendar_id) || null,
     selected_name: (creds.integration && creds.integration.calendar_name) || null,
+    agenda_calendar_ids: agendaCalendarIds,
   };
   if (listado.sinClosers) out.hint = 'Importá primero a tus closers desde Equipo desde HighLevel';
   console.log(`[api] GET /api/ghl/calendars admin=${admin.uid} org=${admin.org_id} n=${listado.calendars.length} -> 200`);
@@ -919,6 +927,60 @@ async function setGhlCalendar(req, res, admin) {
   leadsCache.delete(admin.org_id); // los leads cacheados eran del calendario anterior
   console.log(`[api] POST /api/integrations/ghl/calendar admin=${admin.uid} org=${admin.org_id} saved -> 200`);
   return sendJSON(res, 200, { ok: true, calendar_name: cal.name });
+}
+
+// ---------- POST /api/integrations/ghl/agenda-calendars ----------
+// Guarda los calendarios donde los SETTERS agendan llamadas (multi). Sus citas
+// cuentan como "agendas" del setter en el motor. Distinto del "Calendario de
+// llamadas" del closer (st_integrations.calendar_id), que se maneja aparte.
+// NUNCA confía en el body: cada calendar_id se re-valida contra la lista real de
+// la subcuenta (listOrgCalendars). Persiste en st_kpi_config._config sin pisar
+// el resto de la config (booking_domains, etc.).
+async function setGhlAgendaCalendars(req, res, admin) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
+  const raw = parsed.data && parsed.data.calendar_ids;
+  if (!Array.isArray(raw)) return sendJSON(res, 400, { error: 'calendar_ids debe ser una lista' });
+  const wanted = [...new Set(raw.map((s) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean))];
+
+  // Validar cada ID contra los calendarios reales de la subcuenta (salvo lista vacía = limpiar).
+  if (wanted.length) {
+    let creds;
+    try {
+      creds = await getGhlCreds(admin.org_id);
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
+    }
+    if (!creds) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
+    let listado;
+    try {
+      listado = await listOrgCalendars(creds, admin.org_id);
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
+    }
+    const validIds = new Set((listado.calendars || []).map((c) => c.id));
+    const invalid = wanted.filter((id) => !validIds.has(id));
+    if (invalid.length) return sendJSON(res, 400, { error: 'Uno o más calendarios no están disponibles' });
+  }
+
+  // Merge en el _config existente (no pisar booking_domains ni otras claves).
+  const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(admin.org_id) + '&kpi=eq._config&select=config');
+  const current = (cfgRows[0] && cfgRows[0].config) || {};
+  const merged = { ...current, agenda_calendar_ids: wanted };
+  try {
+    const upsertRes = await fetch(SUPABASE_URL + '/rest/v1/st_kpi_config?on_conflict=org_id,kpi', {
+      method: 'POST',
+      headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify({ org_id: admin.org_id, kpi: '_config', config: merged }),
+    });
+    if (upsertRes.status < 200 || upsertRes.status >= 300) {
+      return sendJSON(res, 500, { error: 'No se pudieron guardar los calendarios de agenda' });
+    }
+  } catch {
+    return sendJSON(res, 500, { error: 'No se pudieron guardar los calendarios de agenda' });
+  }
+  console.log(`[api] POST /api/integrations/ghl/agenda-calendars admin=${admin.uid} org=${admin.org_id} n=${wanted.length} -> 200`);
+  return sendJSON(res, 200, { ok: true, agenda_calendar_ids: wanted });
 }
 
 // ---------- POST /api/sales/ghl ----------
@@ -2829,6 +2891,12 @@ const server = http.createServer(async (req, res) => {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
       return setGhlCalendar(req, res, admin);
+    }
+
+    if (req.method === 'POST' && path === '/api/integrations/ghl/agenda-calendars') {
+      const admin = await requireAdmin(req);
+      if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
+      return setGhlAgendaCalendars(req, res, admin);
     }
 
     // Rutas del módulo Ventas-GHL: cualquier miembro ACTIVO del equipo (no solo admin).
