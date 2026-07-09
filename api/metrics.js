@@ -138,33 +138,40 @@ export async function computeMemberKpis(ctx) {
       if (!todays.length) continue;
       const type = msgs[0].messageType || c.lastMessageType || '';
       const isIg = IG_TYPES.has(type), isWa = WA_TYPES.has(type), isTk = TK_TYPES.has(type);
-      // canal WhatsApp por utm_source del contacto (Estándar UTM) con fallback a tag origen:*
-      let waCanal = null;
-      if (isWa) {
+      // Traer el contacto para leer su fecha de alta (esNuevo) y, en WhatsApp, el
+      // canal por utm_source. Una vez por conversación; cachea el nombre para el desglose.
+      let esNuevo = false, waCanal = null;
+      if (c.contactId) {
         const contact = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(c.contactId)}`, H);
         const cc = contact.contact || {};
-        if (c.contactId) contactNames.set(c.contactId, nombreDe(cc));
-        const cf = (cc.customFields || []).find((f) => String(f.key || f.name || '').toLowerCase().includes('utm_source'));
-        const src = String((cf && cf.value) || (cc.tags || []).find((t) => String(t).startsWith('origen:')) || '').toLowerCase();
-        if (src.includes('tiktok')) waCanal = 'tk'; else if (src.includes('instagram')) waCanal = 'ig';
-      }
-      // apertura: primer mensaje histórico saliente humano y de hoy
-      if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) { if (isTk) { out.outbound_tk++; bump('outbound_tk', c.contactId); } else { out.outbound++; bump('outbound', c.contactId); } }
-      // bienvenida: apertura automática (ManyChat) de hoy — solo IG (donde corre ManyChat)
-      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) { out.bienvenidas++; bump('bienvenidas', c.contactId); }
-      // inbound: PERSONAS (conversaciones únicas con entrante hoy)
-      if (todays.some((m) => m.direction === 'inbound')) {
-        if (isIg) { out.inbound_ig++; bump('inbound_ig', c.contactId); }
-        if (isTk) { out.inbound_tk++; bump('inbound_tk', c.contactId); } // DM nativo de TikTok (TYPE_TIKTOK), separado del WhatsApp-de-TikTok
+        contactNames.set(c.contactId, nombreDe(cc));
+        esNuevo = cc.dateAdded ? inDay(cc.dateAdded) : false;
         if (isWa) {
+          const cf = (cc.customFields || []).find((f) => String(f.key || f.name || '').toLowerCase().includes('utm_source'));
+          const src = String((cf && cf.value) || (cc.tags || []).find((t) => String(t).startsWith('origen:')) || '').toLowerCase();
+          if (src.includes('tiktok')) waCanal = 'tk'; else if (src.includes('instagram')) waCanal = 'ig';
+        }
+      }
+      const abrioSetter = humanOut(msgs[0]) && inDay(msgs[0].dateAdded);
+      const primerEntrante = msgs[0].direction === 'inbound';
+      if (esNuevo && abrioSetter) {
+        // outbound: apertura a un lead NUEVO (todos los canales)
+        if (isTk) { out.outbound_tk++; bump('outbound_tk', c.contactId); } else { out.outbound++; bump('outbound', c.contactId); }
+      } else if (esNuevo && primerEntrante) {
+        // inbound: lead NUEVO que escribió primero (por canal)
+        if (isIg) { out.inbound_ig++; bump('inbound_ig', c.contactId); }
+        else if (isTk) { out.inbound_tk++; bump('inbound_tk', c.contactId); }
+        else if (isWa) {
           if (waCanal === 'tk') { out.inbound_wpp_tk++; bump('inbound_wpp_tk', c.contactId); }
           else if (waCanal === 'ig') { out.inbound_wpp_ig++; bump('inbound_wpp_ig', c.contactId); }
           else { out.inbound_wpp_sin_canal++; bump('inbound_wpp_sin_canal', c.contactId); }
         }
+      } else if (!esNuevo && todays.some((m) => m.direction === 'inbound')) {
+        // respuesta: contacto que YA existía te escribe hoy
+        if (isTk) { out.resp_tk++; bump('resp_tk', c.contactId); } else { out.respuestas++; bump('respuestas', c.contactId); }
       }
-      // respuestas: entrante de hoy posterior a un saliente humano previo
-      const outTimes = msgs.filter(humanOut).map((m) => new Date(m.dateAdded).getTime());
-      if (todays.some((m) => m.direction === 'inbound' && outTimes.some((t) => t < new Date(m.dateAdded).getTime()))) { if (isTk) { out.resp_tk++; bump('resp_tk', c.contactId); } else { out.respuestas++; bump('respuestas', c.contactId); } }
+      // bienvenida: apertura automática (ManyChat) de hoy — solo IG (donde corre ManyChat)
+      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) { out.bienvenidas++; bump('bienvenidas', c.contactId); }
       // seguimiento: saliente humano de hoy en conversación que NO abrió hoy
       if (!inDay(msgs[0].dateAdded) && todays.some(humanOut)) {
         if (isIg) { out.seg_ig++; bump('seg_ig', c.contactId); } else if (isWa) { out.seg_wpp++; bump('seg_wpp', c.contactId); } else if (isTk) { out.seg_tk++; bump('seg_tk', c.contactId); }
