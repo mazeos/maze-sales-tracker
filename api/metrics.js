@@ -82,7 +82,7 @@ export async function computeMemberKpis(ctx) {
 
   // ---------- Conversaciones (setter) ----------
   if (member.role === 'setter') {
-    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0, outbound_tk: 0, resp_tk: 0, inbound_tk: 0, seg_tk: 0 });
+    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0, outbound_tk: 0, resp_tk: 0, inbound_tk: 0, seg_tk: 0, bienvenidas: 0 });
     // paginación hacia atrás hasta cubrir el inicio del día
     let all = [], cursor = null;
     for (let page = 0; page < 20; page++) {
@@ -100,6 +100,8 @@ export async function computeMemberKpis(ctx) {
     // contener mensajes del día pedido)
     const mias = all.filter((c) => c.lastMessageDate >= range.start && c.assignedTo === member.ghl_user_id);
     const humanOut = (m) => m.direction === 'outbound' && (m.source === 'app' || !m.source);
+    // bienvenida = saliente automatizado (ManyChat), el opuesto de humanOut
+    const autoOut = (m) => m.direction === 'outbound' && !!m.source && m.source !== 'app';
     const domRe = bookingDomains && bookingDomains.length
       ? new RegExp(bookingDomains.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i')
       : null;
@@ -122,6 +124,8 @@ export async function computeMemberKpis(ctx) {
       }
       // apertura: primer mensaje histórico saliente humano y de hoy
       if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) { if (isTk) out.outbound_tk++; else out.outbound++; }
+      // bienvenida: apertura automática (ManyChat) de hoy — solo IG (donde corre ManyChat)
+      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) out.bienvenidas++;
       // inbound: PERSONAS (conversaciones únicas con entrante hoy)
       if (todays.some((m) => m.direction === 'inbound')) {
         if (isIg) out.inbound_ig++;
