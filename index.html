@@ -1055,6 +1055,7 @@ function derivedRows(role, dayList){
       {label:'Total links', def:'Links de agenda IG + Wpp.', num:ds=>get(ds,'links_ig')+get(ds,'links_wpp')},
       {label:'Total agendados', def:'Agendados IG + Wpp.', num:ds=>get(ds,'agend_ig')+get(ds,'agend_wpp')},
       {label:'Tasa link→agenda', def:'Agendados ÷ links enviados.', pct:ds=>[get(ds,'agend_ig')+get(ds,'agend_wpp'), get(ds,'links_ig')+get(ds,'links_wpp')]},
+      {label:'% respuesta outbound TikTok', def:'Respuestas ÷ outbound de TikTok.', pct:ds=>[get(ds,'resp_tk'), get(ds,'outbound_tk')]},
     ],
     triage:[
       {label:'% Asistencia', def:'Asistencias ÷ agendadas.', pct:ds=>[get(ds,'asistencias'),get(ds,'agendadas')]},
