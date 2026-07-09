@@ -46,6 +46,7 @@ function kpisCitas(events, userId, { start, end }, prevShowedContacts) {
 // Canal de una conversación
 const IG_TYPES = new Set(['TYPE_INSTAGRAM']);
 const WA_TYPES = new Set(['TYPE_WHATSAPP', 'TYPE_SMS', 'TYPE_CUSTOM_SMS']);
+const TK_TYPES = new Set(['TYPE_TIKTOK']);
 
 export async function computeMemberKpis(ctx) {
   const { ghlBase, token, locationId, calendarId, tz, date, member, salesRows, cuotasRows, bookingDomains } = ctx;
@@ -81,7 +82,7 @@ export async function computeMemberKpis(ctx) {
 
   // ---------- Conversaciones (setter) ----------
   if (member.role === 'setter') {
-    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0 });
+    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0, outbound_tk: 0, resp_tk: 0, inbound_tk: 0, seg_tk: 0, bienvenidas: 0, agend_ig: 0, agend_wpp: 0 });
     // paginación hacia atrás hasta cubrir el inicio del día
     let all = [], cursor = null;
     for (let page = 0; page < 20; page++) {
@@ -99,9 +100,15 @@ export async function computeMemberKpis(ctx) {
     // contener mensajes del día pedido)
     const mias = all.filter((c) => c.lastMessageDate >= range.start && c.assignedTo === member.ghl_user_id);
     const humanOut = (m) => m.direction === 'outbound' && (m.source === 'app' || !m.source);
+    // bienvenida = saliente automatizado (ManyChat), el opuesto de humanOut
+    const autoOut = (m) => m.direction === 'outbound' && !!m.source && m.source !== 'app';
     const domRe = bookingDomains && bookingDomains.length
       ? new RegExp(bookingDomains.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i')
       : null;
+    // Agendas: contactos a los que el setter les envió un link de agenda hoy, con su canal.
+    // Ventana de atribución link → cita (parámetro; ver cruce post-loop).
+    const AGENDA_WINDOW_DAYS = 7;
+    const linkedContacts = new Map(); // contactId -> 'ig' | 'wpp'
     for (const c of mias) {
       const mm = await ghlFetch(`${ghlBase}/conversations/${encodeURIComponent(c.id)}/messages?limit=100`, H);
       const msgs = ((mm.messages && mm.messages.messages) || []).slice().sort((a, b) => new Date(a.dateAdded) - new Date(b.dateAdded));
@@ -109,7 +116,7 @@ export async function computeMemberKpis(ctx) {
       const todays = msgs.filter((m) => inDay(m.dateAdded));
       if (!todays.length) continue;
       const type = msgs[0].messageType || c.lastMessageType || '';
-      const isIg = IG_TYPES.has(type), isWa = WA_TYPES.has(type);
+      const isIg = IG_TYPES.has(type), isWa = WA_TYPES.has(type), isTk = TK_TYPES.has(type);
       // canal WhatsApp por utm_source del contacto (Estándar UTM) con fallback a tag origen:*
       let waCanal = null;
       if (isWa) {
@@ -120,24 +127,47 @@ export async function computeMemberKpis(ctx) {
         if (src.includes('tiktok')) waCanal = 'tk'; else if (src.includes('instagram')) waCanal = 'ig';
       }
       // apertura: primer mensaje histórico saliente humano y de hoy
-      if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) out.outbound++;
+      if (humanOut(msgs[0]) && inDay(msgs[0].dateAdded)) { if (isTk) out.outbound_tk++; else out.outbound++; }
+      // bienvenida: apertura automática (ManyChat) de hoy — solo IG (donde corre ManyChat)
+      if (isIg && autoOut(msgs[0]) && inDay(msgs[0].dateAdded)) out.bienvenidas++;
       // inbound: PERSONAS (conversaciones únicas con entrante hoy)
       if (todays.some((m) => m.direction === 'inbound')) {
         if (isIg) out.inbound_ig++;
-        // TYPE_TIKTOK (DM nativo): aún no existe como métrica del tracker — se ignora en Fase A
+        if (isTk) out.inbound_tk++; // DM nativo de TikTok (TYPE_TIKTOK), separado del WhatsApp-de-TikTok
         if (isWa) { if (waCanal === 'tk') out.inbound_wpp_tk++; else if (waCanal === 'ig') out.inbound_wpp_ig++; else out.inbound_wpp_sin_canal++; }
       }
       // respuestas: entrante de hoy posterior a un saliente humano previo
       const outTimes = msgs.filter(humanOut).map((m) => new Date(m.dateAdded).getTime());
-      if (todays.some((m) => m.direction === 'inbound' && outTimes.some((t) => t < new Date(m.dateAdded).getTime()))) out.respuestas++;
+      if (todays.some((m) => m.direction === 'inbound' && outTimes.some((t) => t < new Date(m.dateAdded).getTime()))) { if (isTk) out.resp_tk++; else out.respuestas++; }
       // seguimiento: saliente humano de hoy en conversación que NO abrió hoy
       if (!inDay(msgs[0].dateAdded) && todays.some(humanOut)) {
-        if (isIg) out.seg_ig++; else if (isWa) out.seg_wpp++;
+        if (isIg) out.seg_ig++; else if (isWa) out.seg_wpp++; else if (isTk) out.seg_tk++;
       }
       // links de agenda enviados hoy (content-match del dominio de la org)
       if (domRe) {
         const n = todays.filter((m) => humanOut(m) && domRe.test(m.body || '')).length;
         if (isIg) out.links_ig += n; else if (isWa) out.links_wpp += n;
+        if (n > 0 && (isIg || isWa)) linkedContacts.set(c.contactId, isIg ? 'ig' : 'wpp');
+      }
+    }
+
+    // ---------- Agendas (setter): cruce link enviado ↔ cita del contacto ----------
+    // La cita se atribuye al setter si su contacto recibió un link de agenda dentro de
+    // los AGENDA_WINDOW_DAYS previos a la cita. En Fase A el link se detecta hoy, así que
+    // la ventana es un colchón hacia adelante (cita del día o de los próximos 7 días).
+    // NO se filtra por assignedUserId: la cita suele quedar asignada al closer, no al setter;
+    // el mecanismo de atribución es el cruce por contactId (createdBy.userId suele venir null).
+    if (linkedContacts.size && calendarId) {
+      const winEnd = range.start + AGENDA_WINDOW_DAYS * 86400000;
+      const ag = await ghlFetch(`${ghlBase}/calendars/events?locationId=${encodeURIComponent(locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${range.start}&endTime=${winEnd}`, H);
+      // REGLA DE ORO: re-filtrar client-side por la ventana (GHL no respeta el rango del query).
+      const inWin = (iso) => { const t = new Date(iso).getTime(); return t >= range.start && t < winEnd; };
+      for (const e of (ag.events || [])) {
+        if (e.deleted || !inWin(e.startTime)) continue;
+        const canal = linkedContacts.get(e.contactId);
+        if (!canal) continue;
+        if (canal === 'ig') out.agend_ig++; else out.agend_wpp++;
+        linkedContacts.delete(e.contactId); // una agenda por contacto linkeado
       }
     }
   }
