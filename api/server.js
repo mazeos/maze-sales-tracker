@@ -731,12 +731,14 @@ async function runShadowForOrg(orgId, dateStr) {
 
   const rows = [];
   for (const m of activos) {
-    let kpis = {};
+    let kpis = {}, kpiContacts = {};
     try {
-      kpis = await computeMemberKpis({
+      const kpiResult = await computeMemberKpis({
         ghlBase: GHL_BASE, token: creds ? creds.token : null, locationId: creds ? creds.locationId : null,
         calendarId: creds ? calendarId : null, tz, date, member: m, salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
       });
+      kpis = kpiResult.values;
+      kpiContacts = kpiResult.contacts;
     } catch (e) {
       console.warn('[shadow] member', m.id, 'falló:', e.message);
       continue;
@@ -744,7 +746,7 @@ async function runShadowForOrg(orgId, dateStr) {
     const ents = await svcGet('st_entries?member_id=eq.' + encodeURIComponent(m.id) + '&entry_date=eq.' + encodeURIComponent(date) + '&select=metrics');
     const manual = (ents[0] && ents[0].metrics) || {};
     for (const [kpi, val] of Object.entries(kpis)) {
-      rows.push({ org_id: orgId, member_id: m.id, metric_date: date, kpi, auto_value: val, manual_value: manual[kpi] == null ? null : +manual[kpi], computed_at: new Date().toISOString() });
+      rows.push({ org_id: orgId, member_id: m.id, metric_date: date, kpi, auto_value: val, manual_value: manual[kpi] == null ? null : +manual[kpi], contacts: kpiContacts[kpi] || null, computed_at: new Date().toISOString() });
     }
   }
   if (rows.length) {
