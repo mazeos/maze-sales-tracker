@@ -82,7 +82,7 @@ export async function computeMemberKpis(ctx) {
 
   // ---------- Conversaciones (setter) ----------
   if (member.role === 'setter') {
-    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0, outbound_tk: 0, resp_tk: 0, inbound_tk: 0, seg_tk: 0, bienvenidas: 0 });
+    Object.assign(out, { outbound: 0, inbound_ig: 0, inbound_wpp_tk: 0, inbound_wpp_ig: 0, inbound_wpp_sin_canal: 0, respuestas: 0, seg_ig: 0, seg_wpp: 0, links_ig: 0, links_wpp: 0, outbound_tk: 0, resp_tk: 0, inbound_tk: 0, seg_tk: 0, bienvenidas: 0, agend_ig: 0, agend_wpp: 0 });
     // paginación hacia atrás hasta cubrir el inicio del día
     let all = [], cursor = null;
     for (let page = 0; page < 20; page++) {
@@ -105,6 +105,10 @@ export async function computeMemberKpis(ctx) {
     const domRe = bookingDomains && bookingDomains.length
       ? new RegExp(bookingDomains.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i')
       : null;
+    // Agendas: contactos a los que el setter les envió un link de agenda hoy, con su canal.
+    // Ventana de atribución link → cita (parámetro; ver cruce post-loop).
+    const AGENDA_WINDOW_DAYS = 7;
+    const linkedContacts = new Map(); // contactId -> 'ig' | 'wpp'
     for (const c of mias) {
       const mm = await ghlFetch(`${ghlBase}/conversations/${encodeURIComponent(c.id)}/messages?limit=100`, H);
       const msgs = ((mm.messages && mm.messages.messages) || []).slice().sort((a, b) => new Date(a.dateAdded) - new Date(b.dateAdded));
@@ -143,6 +147,27 @@ export async function computeMemberKpis(ctx) {
       if (domRe) {
         const n = todays.filter((m) => humanOut(m) && domRe.test(m.body || '')).length;
         if (isIg) out.links_ig += n; else if (isWa) out.links_wpp += n;
+        if (n > 0 && (isIg || isWa)) linkedContacts.set(c.contactId, isIg ? 'ig' : 'wpp');
+      }
+    }
+
+    // ---------- Agendas (setter): cruce link enviado ↔ cita del contacto ----------
+    // La cita se atribuye al setter si su contacto recibió un link de agenda dentro de
+    // los AGENDA_WINDOW_DAYS previos a la cita. En Fase A el link se detecta hoy, así que
+    // la ventana es un colchón hacia adelante (cita del día o de los próximos 7 días).
+    // NO se filtra por assignedUserId: la cita suele quedar asignada al closer, no al setter;
+    // el mecanismo de atribución es el cruce por contactId (createdBy.userId suele venir null).
+    if (linkedContacts.size && calendarId) {
+      const winEnd = range.start + AGENDA_WINDOW_DAYS * 86400000;
+      const ag = await ghlFetch(`${ghlBase}/calendars/events?locationId=${encodeURIComponent(locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${range.start}&endTime=${winEnd}`, H);
+      // REGLA DE ORO: re-filtrar client-side por la ventana (GHL no respeta el rango del query).
+      const inWin = (iso) => { const t = new Date(iso).getTime(); return t >= range.start && t < winEnd; };
+      for (const e of (ag.events || [])) {
+        if (e.deleted || !inWin(e.startTime)) continue;
+        const canal = linkedContacts.get(e.contactId);
+        if (!canal) continue;
+        if (canal === 'ig') out.agend_ig++; else out.agend_wpp++;
+        linkedContacts.delete(e.contactId); // una agenda por contacto linkeado
       }
     }
   }
