@@ -2132,7 +2132,11 @@ function recapHoy(){
     else {
       detalle=conAlgo.map(r=>{
         const mismatch=r.manual_value!=null && +r.manual_value!==+r.auto_value;
-        return `<span class="chip" style="${mismatch?'border-color:#ff6b6b;color:#ff6b6b':''}">${esc(r.kpi)}: <b>${+r.auto_value}</b>${r.manual_value!=null?` / manual ${+r.manual_value}`:''}</span>`;
+        const cs=Array.isArray(r.contacts)?r.contacts:[];
+        const rid=`rc_${esc(m.id)}_${esc(r.kpi)}`;
+        const chip=`<span class="chip" ${cs.length?`onclick="toggleRecapContacts('${rid}')" `:''}style="${cs.length?'cursor:pointer;':''}${mismatch?'border-color:#ff6b6b;color:#ff6b6b':''}">${esc(r.kpi)}: <b>${+r.auto_value}</b>${r.manual_value!=null?` / manual ${+r.manual_value}`:''}${cs.length?' ▾':''}</span>`;
+        const panel=cs.length?`<div id="${rid}" class="rc-panel" style="display:none;flex-basis:100%;margin:2px 0 6px;padding-left:8px">${cs.map(c=>{const label=`${esc(c.name)}${c.count?` ×${c.count}`:''}`;return GHL_LOC?`<a href="https://app.mazefunnels.com/v2/location/${esc(GHL_LOC)}/contacts/detail/${esc(c.id)}" target="_blank" rel="noopener" style="display:inline-block;margin:2px 8px 2px 0;font-size:12px">${label} 🔗</a>`:`<span style="display:inline-block;margin:2px 8px 2px 0;font-size:12px;color:var(--muted)">${label}</span>`;}).join('')}</div>`:'';
+        return chip+panel;
       }).join(' ');
       chip=diffs.length?`<span class="cuo-est venc">${diffs.length} diferencia${diffs.length>1?'s':''}</span>`:`<span class="cuo-est paga">sin diferencias</span>`;
     }
@@ -2145,6 +2149,7 @@ function recapHoy(){
   return `<div style="margin-bottom:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:8px">Recap de HOY (${hoy})${hora?` · última corrida ${hora}`:' · tocá "Recap del día" para generarlo'}</div>${html}</div>`;
 }
 function calibracionCard(){
+  if(GHL_LOC===null) loadGhlLocation(); // para los links del desglose de contactos (re-render al llegar)
   if(SHADOW===null){ loadShadow(); return `<div class="section"><div class="eyebrow">Auto-carga (modo sombra)</div><p style="color:var(--muted);font-size:13px;margin:0">Cargando calibración…</p></div>`; }
   const cfgRow=(KPI_CFG||[]).find(k=>k.kpi==='_config');
   const doms=((cfgRow&&cfgRow.config&&cfgRow.config.booking_domains)||[]).join(', ');
@@ -2192,6 +2197,7 @@ window.setBookingDomains=async(v)=>{
   const {error}=await sb.from('st_kpi_config').upsert({org_id:ME.org_id,kpi:'_config',config:{...cur,booking_domains:domains}},{onConflict:'org_id,kpi'});
   toast(error?'No se pudo guardar':'Dominios guardados'); KPI_CFG=null; SHADOW=null; renderTeam();
 };
+window.toggleRecapContacts=(id)=>{ const el=document.getElementById(id); if(el) el.style.display=el.style.display==='none'?'block':'none'; };
 window.setAgName=(v)=>{ if(!IS_ADMIN) return; DB.team.name=(v||'Mi Agencia').trim(); save(); };
 window.setMode=(v)=>{ if(!IS_ADMIN) return; DB.team.mode=v; save(); };
 window.setTz=(v)=>{ if(!IS_ADMIN) return; DB.team.tz=v; save(); toast('Zona horaria guardada'); renderTeam(); };
@@ -2393,7 +2399,7 @@ async function loadGhlLocation(){
     const r=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
     if(!r.ok) return;
     const j=await r.json();
-    if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); }
+    if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); else if(state.view==='team') renderTeam(); }
   }catch(e){}
 }
 // Refresca las cuotas desde Supabase (el trigger las genera server-side al
