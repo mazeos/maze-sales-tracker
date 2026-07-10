@@ -1044,6 +1044,7 @@ function renderTable(){
       <span class="chip">${MONTHS[mo]} ${y}</span>
       <button class="chip icon" onclick="tblNav(1)">›</button>
       <span class="badge" data-tip="Igual que en Google Sheets: hacé clic en una celda y escribí. Se guarda solo.">✎ Editá cualquier celda</span>
+      ${canEdit?`<button class="chip" onclick="backfillTable()" data-tip="Trae la data de HighLevel de todo el mes visible (día por día) y llena las celdas. Muestra una vista previa antes de escribir.">⚡ Traer de HighLevel</button>`:''}
     </div>
     <div class="sheet"><table class="grid"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
   }
@@ -1081,6 +1082,42 @@ function derivedRows(role, dayList){
   });
   return out;
 }
+function bfShow(html){ let o=document.getElementById('bfOverlay'); if(!o){ o=document.createElement('div'); o.id='bfOverlay'; o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:100'; document.body.appendChild(o); } o.innerHTML=`<div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px;max-width:440px;width:90%">${html}</div>`; return o; }
+window.bfClose=()=>{ const o=document.getElementById('bfOverlay'); if(o) o.remove(); };
+// Backfill: trae la data de GHL del mes visible, día por día, vía /api/capture/ghl.
+window.backfillTable=async()=>{
+  const canEdit=IS_ADMIN||(ME&&state.tblMember===ME.id); if(!canEdit) return;
+  const ref=parseD(state.tblRef), y=ref.getFullYear(), mo=ref.getMonth();
+  const last=new Date(y,mo+1,0).getDate(), today=todayStr(), days=[];
+  for(let d=1;d<=last;d++){ const ds=`${y}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; if(ds<=today) days.push(ds); }
+  if(!days.length){ toast('No hay días para traer'); return; }
+  bfShow(`<b>Trayendo de HighLevel…</b><div id="bfProg" style="margin-top:10px;color:var(--muted);font-size:13px">Día 0 de ${days.length}</div>`);
+  const { data:{ session } }=await sb.auth.getSession(); if(!session){ bfClose(); toast('Tu sesión venció'); return; }
+  const trae={};
+  for(let i=0;i<days.length;i++){ const ds=days[i]; const p=document.getElementById('bfProg'); if(p) p.textContent=`Día ${i+1} de ${days.length} · ${ds}`;
+    try{ const q=new URLSearchParams({date:ds,member_id:state.tblMember});
+      const r=await fetch('/api/capture/ghl?'+q,{headers:{'Authorization':'Bearer '+session.access_token}});
+      if(r.ok){ const j=await r.json(); const m={}; for(const k in (j.metrics||{})) m[k]=+j.metrics[k].value||0; trae[ds]=m; }
+    }catch(e){}
+  }
+  let nuevas=0, pisan=0;
+  for(const ds in trae){ const cur=DB.entries[state.tblMember+'|'+ds]||{}; for(const k in trae[ds]){ if(trae[ds][k]>0){ if(cur[k]!=null && +cur[k]>0 && +cur[k]!==trae[ds][k]) pisan++; else nuevas++; } } }
+  window._bfData=trae;
+  bfShow(`<b>Vista previa</b>
+    <p style="color:var(--muted);font-size:13px;margin:8px 0 0">Traje <b style="color:var(--ink)">${Object.keys(trae).length}</b> días de HighLevel.</p>
+    <p style="font-size:13px;margin:6px 0 0"><b style="color:var(--lima)">${nuevas}</b> valores para celdas vacías · <b style="color:#ff6b6b">${pisan}</b> pisarían carga manual existente.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+      <button class="btn" onclick="bfApply(false)">Aplicar solo a lo vacío</button>
+      <button class="btn ghost" onclick="bfApply(true)">Sobrescribir todo</button>
+      <button class="btn ghost" onclick="bfClose()">Cancelar</button>
+    </div>`);
+};
+window.bfApply=async(overwrite)=>{
+  const trae=window._bfData||{};
+  for(const ds in trae){ const key=state.tblMember+'|'+ds; if(!DB.entries[key]) DB.entries[key]={};
+    for(const k in trae[ds]){ const v=trae[ds][k]; if(!v) continue; const cur=+DB.entries[key][k]||0; if(overwrite||cur===0) DB.entries[key][k]=v; } }
+  bfClose(); await save(); toast('Datos de HighLevel aplicados'); renderTable();
+};
 window.setTblMember=(id)=>{ state.tblMember=id; renderTable(); };
 window.tblNav=(dir)=>{ const r=parseD(state.tblRef); r.setMonth(r.getMonth()+dir); state.tblRef=dstr(r); renderTable(); };
 window.tblEdit=(el)=>{
