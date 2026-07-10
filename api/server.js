@@ -212,7 +212,7 @@ async function checkUserToken(bearerToken) {
     return { ok: false, status: 401, error: 'Sesión inválida' };
   }
 
-  return { ok: true, uid };
+  return { ok: true, uid, email: (user && user.email) || null };
 }
 
 // Multi-cuenta: resuelve el PERFIL ACTIVO de un login (st_user_state validado,
@@ -282,7 +282,8 @@ async function requireMember(req) {
     return { ok: false, status: 403, error: 'Tu usuario no está activo en el equipo' };
   }
   // uid = id del PERFIL activo (los consumidores lo usan como member_id)
-  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name };
+  const isSuper = !!(usr.email && SUPER_ADMINS.includes(String(usr.email).toLowerCase()));
+  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name, is_super: isSuper };
 }
 
 // ---------- Auth: super-admin de la plataforma (equipo Maze) ----------
@@ -611,7 +612,7 @@ async function captureGhl(req, res, member, url) {
 
   // Target: uno mismo, o cualquier miembro de la org si el caller es admin.
   const targetId = url.searchParams.get('member_id') || member.uid;
-  if (targetId !== member.uid && member.role !== 'admin') {
+  if (targetId !== member.uid && member.role !== 'admin' && !member.is_super) {
     return sendJSON(res, 403, { error: 'Solo el admin puede autocompletar el día de otro miembro' });
   }
 
