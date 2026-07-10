@@ -1577,14 +1577,15 @@ function orgsCard(){
       </div>`;
   const form=`<div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px">
     <b style="font-size:13px;display:block;margin:0 0 8px">Nueva organización</b>
-    <div class="grid2">
+    ${locField}
+    ${PLAT_LOC_SEL ? `<div class="grid2" style="margin-top:10px">
       <div class="field"><label>Nombre de la organización</label><input class="inp" id="orgName" placeholder="Ej: Camino Digital"></div>
       <div class="field"><label>Nombre del admin</label><input class="inp" id="orgAdminName" placeholder="Ej: Clara"></div>
       <div class="field"><label>Email del admin</label><input class="inp" id="orgAdminEmail" type="email" placeholder="admin@email.com"></div>
       <div class="field"><label>Contraseña</label><input class="inp" id="orgAdminPass" type="text" placeholder="dejá vacío para autogenerar"></div>
-      ${locField}
     </div>
-    <button class="btn" onclick="createOrg()" ${ORG_CREATING?'disabled':''}>${ORG_CREATING?'Creando…':'Crear organización'}</button>
+    <button class="btn" onclick="createOrg()" ${ORG_CREATING?'disabled':''}>${ORG_CREATING?'Creando…':'Crear organización'}</button>`
+    : `<p style="color:var(--muted);font-size:13px;margin:10px 0 0">Elegí una subcuenta de HighLevel para completar los datos de la organización.</p>`}
   </div>`;
   return `<div class="section"><div class="eyebrow">Organizaciones</div>${credBox}${tableBox}${form}</div>`;
 }
