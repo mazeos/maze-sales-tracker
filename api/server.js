@@ -260,7 +260,7 @@ async function checkAdminToken(bearerToken) {
   }
 
   // uid = id del PERFIL (semántica histórica: en cuentas pre-multicuenta coincide con el login)
-  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id };
+  return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id, is_super: isSuper };
 }
 
 function requireAdmin(req) {
@@ -284,6 +284,14 @@ async function requireMember(req) {
   // uid = id del PERFIL activo (los consumidores lo usan como member_id)
   const isSuper = !!(usr.email && SUPER_ADMINS.includes(String(usr.email).toLowerCase()));
   return { ok: true, uid: prof.id, auth_uid: usr.uid, org_id: prof.org_id, role: prof.role, name: prof.name, is_super: isSuper };
+}
+
+// Org efectiva para acciones de la mini-API. Un super-admin puede apuntar a
+// otra org pasando ?org_id= (GET) o body.org_id (POST); cualquier otro caller
+// queda atado a su propia org (el override se ignora). is_super es el gate:
+// el org_id solo elige sobre qué org operar, nunca autoriza.
+function effectiveOrg(auth, requestedOrgId) {
+  return (auth && auth.is_super && requestedOrgId) ? String(requestedOrgId) : auth.org_id;
 }
 
 // ---------- Auth: super-admin de la plataforma (equipo Maze) ----------
@@ -530,10 +538,11 @@ async function ghlWithRetry(creds, doFetch) {
 // fallback al env GHL_CALENDAR (modo PIT / instancia dedicada); sin ninguno → 501.
 // Cache en memoria POR ORG (60s) — una cache global filtraría leads entre tenants.
 const leadsCache = new Map(); // orgId -> { at, data }
-async function ghlLeads(req, res, member) {
+async function ghlLeads(req, res, member, url) {
+  const orgId = effectiveOrg(member, url.searchParams.get('org_id'));
   let creds;
   try {
-    creds = await getGhlCreds(member.org_id);
+    creds = await getGhlCreds(orgId);
   } catch {
     return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
   }
@@ -542,7 +551,7 @@ async function ghlLeads(req, res, member) {
   if (!calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
 
   const now = Date.now();
-  const cached = leadsCache.get(member.org_id);
+  const cached = leadsCache.get(orgId);
   if (cached && cached.data && now - cached.at < 60000) {
     return sendJSON(res, 200, { leads: cached.data, cached: true });
   }
@@ -584,7 +593,7 @@ async function ghlLeads(req, res, member) {
     } catch { /* contacto ilegible: lo salteamos */ }
   }
   leads.sort((a, b) => String(b.cita).localeCompare(String(a.cita)));
-  leadsCache.set(member.org_id, { at: now, data: leads });
+  leadsCache.set(orgId, { at: now, data: leads });
   return sendJSON(res, 200, { leads });
 }
 
@@ -607,6 +616,7 @@ function tzDayRange(dateStr, tz) {
 }
 
 async function captureGhl(req, res, member, url) {
+  const orgId = effectiveOrg(member, url.searchParams.get('org_id'));
   const date = String(url.searchParams.get('date') || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return sendJSON(res, 400, { error: 'Fecha inválida (YYYY-MM-DD)' });
 
@@ -620,7 +630,7 @@ async function captureGhl(req, res, member, url) {
   try {
     const pr = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(targetId)
-        + '&org_id=eq.' + encodeURIComponent(member.org_id) + '&select=id,role,active,ghl_user_id',
+        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,active,ghl_user_id',
       { headers: svcHeaders() }
     );
     prof = (await pr.json().catch(() => []))[0];
@@ -630,7 +640,7 @@ async function captureGhl(req, res, member, url) {
   if (!prof || prof.active === false) return sendJSON(res, 404, { error: 'Miembro no encontrado o inactivo' });
 
   let creds;
-  try { creds = await getGhlCreds(member.org_id); } catch {
+  try { creds = await getGhlCreds(orgId); } catch {
     return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
   }
   if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
@@ -641,7 +651,7 @@ async function captureGhl(req, res, member, url) {
   // TZ de la org para cortar el día donde corresponde.
   let tz = 'America/Argentina/Buenos_Aires';
   try {
-    const or_ = await fetch(SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(member.org_id) + '&select=tz',
+    const or_ = await fetch(SUPABASE_URL + '/rest/v1/st_orgs?id=eq.' + encodeURIComponent(orgId) + '&select=tz',
       { headers: svcHeaders() });
     const orow = (await or_.json().catch(() => []))[0];
     if (orow && orow.tz) tz = orow.tz;
@@ -682,7 +692,7 @@ async function captureGhl(req, res, member, url) {
   if (prof.role === 'closer') {
     try {
       const sr = await fetch(
-        SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(member.org_id)
+        SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(orgId)
           + '&closer_id=eq.' + encodeURIComponent(targetId) + '&sale_date=eq.' + encodeURIComponent(date) + '&select=cash',
         { headers: svcHeaders() }
       );
@@ -696,7 +706,7 @@ async function captureGhl(req, res, member, url) {
 
   // Setter / triage: KPIs de conversaciones del día vía el motor completo (mismo del modo sombra).
   if (prof.role !== 'closer' && prof.ghl_user_id) {
-    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(member.org_id) + '&kpi=eq._config&select=config');
+    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
     const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
     const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
     let result;
@@ -788,8 +798,9 @@ async function shadowRun(req, res, admin) {
   const parsed = await readJSONBody(req);
   const date = (parsed.ok && parsed.data && parsed.data.date) ? String(parsed.data.date) : null;
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return sendJSON(res, 400, { error: 'Fecha inválida (YYYY-MM-DD)' });
+  const orgId = effectiveOrg(admin, parsed.ok && parsed.data && parsed.data.org_id);
   try {
-    const summary = await runShadowForOrg(admin.org_id, date);
+    const summary = await runShadowForOrg(orgId, date);
     return sendJSON(res, 200, { ok: true, ...summary });
   } catch (e) {
     return sendJSON(res, 502, { error: 'La corrida sombra falló: ' + e.message });
@@ -876,10 +887,11 @@ async function listOrgCalendars(creds, orgId) {
 // ---------- GET /api/ghl/calendars ----------
 // Calendarios elegibles para "Calendario de llamadas" + el actualmente elegido.
 // Solo admin. Nunca expone tokens ni datos de otras orgs.
-async function listGhlCalendars(req, res, admin) {
+async function listGhlCalendars(req, res, admin, url) {
+  const orgId = effectiveOrg(admin, url.searchParams.get('org_id'));
   let creds;
   try {
-    creds = await getGhlCreds(admin.org_id);
+    creds = await getGhlCreds(orgId);
   } catch {
     return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
   }
@@ -887,7 +899,7 @@ async function listGhlCalendars(req, res, admin) {
 
   let listado;
   try {
-    listado = await listOrgCalendars(creds, admin.org_id);
+    listado = await listOrgCalendars(creds, orgId);
   } catch {
     return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
   }
@@ -895,7 +907,7 @@ async function listGhlCalendars(req, res, admin) {
   // Calendarios de agenda del setter ya guardados (para que la UI marque los checkboxes).
   let agendaCalendarIds = [];
   try {
-    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(admin.org_id) + '&kpi=eq._config&select=config');
+    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
     agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
   } catch { /* best-effort: si falla, la UI arranca sin marcados */ }
 
@@ -907,7 +919,7 @@ async function listGhlCalendars(req, res, admin) {
     agenda_calendar_ids: agendaCalendarIds,
   };
   if (listado.sinClosers) out.hint = 'Importá primero a tus closers desde Equipo desde HighLevel';
-  console.log(`[api] GET /api/ghl/calendars admin=${admin.uid} org=${admin.org_id} n=${listado.calendars.length} -> 200`);
+  console.log(`[api] GET /api/ghl/calendars admin=${admin.uid} org=${orgId} n=${listado.calendars.length} -> 200`);
   return sendJSON(res, 200, out);
 }
 
@@ -1044,17 +1056,19 @@ async function setGhlAgendaCalendars(req, res, admin) {
 // Los IDs de custom fields (GHL_CF) y del pipeline (GHL_PIPELINE) vienen por env;
 // si faltan, el paso se saltea sin fallar.
 async function salesGhl(req, res, member) {
+  const parsed = await readJSONBody(req);
+  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
+  const b = parsed.data || {};
+  const orgId = effectiveOrg(member, b.org_id);
+
   let creds;
   try {
-    creds = await getGhlCreds(member.org_id);
+    creds = await getGhlCreds(orgId);
   } catch {
     return sendJSON(res, 502, { error: 'No se pudo refrescar el acceso a GHL. Probá de nuevo.' });
   }
   if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
 
-  const parsed = await readJSONBody(req);
-  if (!parsed.ok) return sendJSON(res, 400, { error: 'JSON inválido' });
-  const b = parsed.data || {};
   const contactId = typeof b.contactId === 'string' ? b.contactId.trim() : '';
   if (!contactId) return sendJSON(res, 400, { error: 'Falta el contacto de GHL' });
 
@@ -1383,11 +1397,12 @@ async function oauthCallback(req, res, url) {
 // Estado de conexión para la UI. El access_token se lee SOLO server-side para
 // distinguir pending (fila pre-vinculada sin tokens) de conectada — JAMÁS
 // viaja en la respuesta.
-async function getGhlStatus(req, res, admin) {
+async function getGhlStatus(req, res, admin, url) {
+  const orgId = effectiveOrg(admin, url.searchParams.get('org_id'));
   let rows;
   try {
     const r = await fetch(
-      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(admin.org_id)
+      SUPABASE_URL + '/rest/v1/st_integrations?org_id=eq.' + encodeURIComponent(orgId)
         + '&select=location_id,location_name,created_at,access_token',
       { headers: svcHeaders() }
     );
@@ -2952,7 +2967,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/integrations/ghl' && (req.method === 'GET' || req.method === 'DELETE')) {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
-      return req.method === 'GET' ? getGhlStatus(req, res, admin) : disconnectGhl(req, res, admin);
+      return req.method === 'GET' ? getGhlStatus(req, res, admin, url) : disconnectGhl(req, res, admin);
     }
 
     if (req.method === 'GET' && path === '/api/ghl/users') {
@@ -2970,7 +2985,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/api/ghl/calendars') {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
-      return listGhlCalendars(req, res, admin);
+      return listGhlCalendars(req, res, admin, url);
     }
 
     if (req.method === 'POST' && path === '/api/integrations/ghl/calendar') {
@@ -2989,7 +3004,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/api/ghl/leads') {
       const member = await requireMember(req);
       if (!member.ok) return sendJSON(res, member.status, { error: member.error });
-      return ghlLeads(req, res, member);
+      return ghlLeads(req, res, member, url);
     }
 
     if (req.method === 'GET' && path === '/api/capture/ghl') {
