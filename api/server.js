@@ -2618,6 +2618,33 @@ async function getPlatformSettings(req, res, sa) {
   });
 }
 
+// ---------- GET /api/platform/location-details?id=xxx ----------
+// Detalle de una subcuenta de la agencia para autocompletar el alta de org
+// (nombre de la subcuenta + dueño + email). SOLO super-admins. Usa el PIT de
+// agencia; el front nunca ve el token. Best-effort: si GHL falla, el front deja
+// los campos como estén.
+async function getLocationDetails(req, res, sa, url) {
+  const locationId = (url.searchParams.get('id') || '').trim();
+  if (!locationId) return sendJSON(res, 400, { error: 'Falta el id de la subcuenta' });
+  const pit = await getPlatformSetting(PIT_KEY);
+  if (!pit) return sendJSON(res, 409, { error: 'Configurá primero el token de agencia' });
+  let body;
+  try {
+    const r = await fetch(GHL_BASE + '/locations/' + encodeURIComponent(locationId), { headers: ghlHeaders(pit) });
+    if (r.status < 200 || r.status >= 300) {
+      console.error(`[api] getLocationDetails fail status=${r.status} loc=${locationId}`);
+      return sendJSON(res, 502, { error: 'No se pudo leer la subcuenta de HighLevel' });
+    }
+    body = await r.json().catch(() => ({}));
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel' });
+  }
+  const loc = (body && body.location) || {};
+  const ownerName = [loc.firstName, loc.lastName].filter(Boolean).join(' ').trim();
+  console.log(`[api] GET /api/platform/location-details super=${sa.email} loc=${locationId} -> 200`);
+  return sendJSON(res, 200, { name: loc.name || '', owner_name: ownerName, email: loc.email || '' });
+}
+
 // ---------- POST /api/platform/settings ----------
 // Guarda/reemplaza/borra el token de agencia GHL. SOLO super-admins.
 // Antes de guardar se valida EN VIVO contra locations/search: un token que no
@@ -3021,6 +3048,12 @@ const server = http.createServer(async (req, res) => {
       const sa = await requireSuperAdmin(req);
       if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
       return listAgencyLocations(req, res, sa, url);
+    }
+
+    if (req.method === 'GET' && path === '/api/platform/location-details') {
+      const sa = await requireSuperAdmin(req);
+      if (!sa.ok) return sendJSON(res, sa.status, { error: sa.error });
+      return getLocationDetails(req, res, sa, url);
     }
 
     // Todo lo demás bajo /api/members exige admin.

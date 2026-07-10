@@ -1681,7 +1681,24 @@ window.pickPlatLoc=(i)=>{
   PLAT_LOC_SEL={id:l.id, name:l.name};
   platLocClose(); // limpia el listener de document ANTES del re-render (que destruye el panel)
   renderPlatform();
+  autofillOrgFromLoc(l.id, l.name); // trae nombre/dueño/email de la subcuenta y prellena el form
 };
+// Autocompleta nombre de org + nombre/email del admin con la data del dueño de la
+// subcuenta (GET /api/platform/location-details). Solo rellena campos vacíos —
+// no pisa lo que el super-admin ya haya escrito. Best-effort.
+async function autofillOrgFromLoc(id, name){
+  const setVal=(elId,val)=>{ const el=document.getElementById(elId); if(el && !el.value && val) el.value=val; };
+  setVal('orgName', name); // el nombre del buscador ya sirve; el detalle puede afinarlo
+  try{
+    const { data:{ session } } = await sb.auth.getSession(); if(!session) return;
+    const r=await fetch('/api/platform/location-details?id='+encodeURIComponent(id),{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(!r.ok) return;
+    const d=await r.json().catch(()=>null); if(!d) return;
+    setVal('orgName', d.name||name);
+    setVal('orgAdminName', d.owner_name);
+    setVal('orgAdminEmail', d.email);
+  }catch(e){ /* best-effort: se deja lo que haya */ }
+}
 window.clearPlatLoc=()=>{ PLAT_LOC_SEL=null; renderPlatform(); };
 window.createOrg=async ()=>{
   if(ORG_CREATING) return;
