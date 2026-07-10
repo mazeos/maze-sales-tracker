@@ -924,7 +924,7 @@ function renderCapture(){
         <select class="chip" onchange="setCapMember(this.value)" data-tip="De quién estás cargando el día.">${memberOpts}</select>
         <input class="chip inp" style="width:auto" type="date" value="${state.capDate}" max="${todayStr()}" onchange="setCapDate(this.value)" data-tip="Podés cargar o corregir cualquier día pasado.">
         <span class="chip"><span class="k">Rol</span> ${ROLE_LABEL[member.role]}</span>
-        ${member.role==='closer' ? `<button class="chip" id="ghlFillBtn" onclick="autofillGhl()" data-tip="Trae lo certero: citas del calendario (llamadas, asistencias, no-shows) y cierres/cash de tus Ventas del día. Revisás y listo.">⚡ Autocompletar</button>` : ''}
+        <button class="chip" id="ghlFillBtn" onclick="autofillGhl()" data-tip="Trae la data de HighLevel de este día para revisar y guardar. Del closer: citas + ventas. Del setter: conversaciones, inbound, respuestas y agendas.">⚡ Autocompletar</button>
         <span class="savepill" id="savePill">✓ Guardado</span>
       </div>
       <div class="taps">${taps}</div>
