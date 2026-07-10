@@ -611,7 +611,7 @@ document.querySelectorAll('.nav-i').forEach(el=>{
     go(el.dataset.view);
   });
 });
-function setNav(){ document.querySelectorAll('.nav-i').forEach(el=>el.classList.toggle('on', el.dataset.view===state.view)); }
+function setNav(){ const np=document.getElementById('nav-platform'); if(np&&IS_SUPER) np.style.display=''; document.querySelectorAll('.nav-i').forEach(el=>el.classList.toggle('on', el.dataset.view===state.view)); }
 
 function render(){
   setNav();
@@ -2705,9 +2705,12 @@ async function boot(){
       const data=await res.json().catch(()=>null);
       if(!data) return;
       IS_SUPER=true; PLAT_SETTINGS=data;
+      // Mostrar el ítem Plataforma ANTES de render(): si render() llegara a lanzar
+      // (estado a medio cargar), el ícono igual queda visible. Antes iba después
+      // del render y un error async lo dejaba oculto (lo tragaba el .catch).
+      const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
       // Super-admin = permisos totales en cualquier equipo (la RLS lo respalda vía st_is_super()).
       if(!IS_ADMIN){ IS_ADMIN=true; render(); }
-      const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
     })
     .catch(()=>{ /* fail-closed: el ítem queda oculto */ });
   // Retorno del flujo OAuth de GHL (query params que deja el callback de la mini-API).
