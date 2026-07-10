@@ -2118,6 +2118,7 @@ window.savePlatPit=async ()=>{
 
 function renderTeam(){
   const ro = !IS_ADMIN;
+  const visiting = SUPER_HOME!==null; // super-admin de visita en otra org: ocultar lo que pega a la mini-API
   const modeOpts=[['solo','Solo setters'],['sc','Setter + Closer'],['full','Setter + Triage + Closer']]
     .map(([v,l])=>`<option value="${v}" ${DB.team.mode===v?'selected':''}>${l}</option>`).join('');
   const tz=(DB.team.tz)||'America/Argentina/Buenos_Aires';
@@ -2154,7 +2155,7 @@ function renderTeam(){
         <select class="inp cfg-role" onchange="setMemberRole('${m.id}',this.value)" data-tip="Cambiar el rol reconfigura qué métricas carga." ${ro?'disabled':''}>${roleOpts(m.role)}</select>
         <span class="cfg-spacer"></span>
         ${(IS_ADMIN || (ME && m.id===ME.id)) ? `<button class="btn ghost sm" onclick="editMemberData('${m.id}')" data-tip="Abre su tabla día×día para corregir cualquier número cargado.">Editar sus números</button>` : ''}
-        ${IS_ADMIN ? `<button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>` : ''}
+        ${(IS_ADMIN && !visiting) ? `<button class="btn danger sm" onclick="delMember('${m.id}')">Quitar</button>` : ''}
       </div>${line2}
     </div>`;
   });
@@ -2173,7 +2174,13 @@ function renderTeam(){
   const addMemberHint=`<div class="section"><div class="eyebrow">Agregar miembro</div>
       <p style="color:var(--muted);font-size:13px;margin:0">El equipo se sincroniza desde HighLevel. Importá miembros desde "Equipo desde HighLevel".</p>
     </div>`;
-  const addMemberBox = !IS_ADMIN ? '' : ((GHL_STATUS && GHL_STATUS.connected) ? addMemberHint : addMemberForm);
+  // De visita en otra org: la gestión de miembros y la conexión de HighLevel pegan
+  // a la mini-API server-side, que resolvería la org madre del super, no la visitada.
+  // Se ocultan y se reemplazan por un hint; el resto (RLS/supabase-js) sigue igual.
+  const visitingHint=`<div class="section"><div class="eyebrow">Miembros y HighLevel</div>
+      <p style="color:var(--muted);font-size:13px;margin:0">Estás de visita en este equipo. La gestión de miembros y la conexión de HighLevel se hacen desde Plataforma → Gestionar.</p>
+    </div>`;
+  const addMemberBox = !IS_ADMIN ? '' : (visiting ? visitingHint : ((GHL_STATUS && GHL_STATUS.connected) ? addMemberHint : addMemberForm));
   VIEW.innerHTML = topbar('') + `<div style="margin-bottom:10px"><button class="btn ghost sm" onclick="go('dashboard')">← Volver al panel</button></div>` + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
     ${adminNotice()}
     <div class="section"><div class="eyebrow">Agencia</div>
@@ -2190,7 +2197,7 @@ function renderTeam(){
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     ${addMemberBox}
-    ${ghlCard()}${ghlTeamCard()}${IS_ADMIN ? calibracionCard() : ''}` + footer();
+    ${visiting ? '' : `${ghlCard()}${ghlTeamCard()}`}${IS_ADMIN ? calibracionCard() : ''}` + footer();
 }
 
 // ---------- Panel de calibración (auto-carga en sombra, Fase A) ----------
@@ -2457,7 +2464,7 @@ window.addSale=async()=>{
   const row={org_id:DB.team.id,sale_date:todayStr(),cliente,programa:g('s_programa')||'—',metodo:g('s_metodo')||'—',
     facturado:+g('s_fact')||0,cash:+g('s_cash')||0,cuotas:+g('s_cuotas')||1,reserva:+g('s_reserva')||0,
     primer_pago:+g('s_primerpago')||0,fue_reserva:fueReserva,ghl_contact_id:ghlId,
-    closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:ME.id};
+    closer_id:g('s_closer')||null,triage_id:g('s_triage')||null,setter_id:g('s_setter')||null,fuente:g('s_fuente')||'—',created_by:SUPER_HOME?null:ME.id};
   const {data,error}=await sb.from('st_sales').insert(row).select().single();
   if(error){ toast('No se pudo (permiso)'); return; }
   DB.sales.push({id:data.id,date:data.sale_date,cliente,programa:row.programa,metodo:row.metodo,facturado:row.facturado,cash:row.cash,cuotas:row.cuotas,reserva:row.reserva,closer:row.closer_id,triage:row.triage_id,setter:row.setter_id,fuente:row.fuente});
