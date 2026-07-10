@@ -627,7 +627,6 @@ async function captureGhl(req, res, member, url) {
     return sendJSON(res, 502, { error: 'No se pudo leer el perfil del miembro' });
   }
   if (!prof || prof.active === false) return sendJSON(res, 404, { error: 'Miembro no encontrado o inactivo' });
-  if (prof.role !== 'closer') return sendJSON(res, 400, { error: 'El autocompletar está disponible solo para closers (v1)' });
 
   let creds;
   try { creds = await getGhlCreds(member.org_id); } catch {
@@ -635,7 +634,8 @@ async function captureGhl(req, res, member, url) {
   }
   if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
   const calendarId = (creds.integration && creds.integration.calendar_id) || GHL_CALENDAR;
-  if (!calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
+  // El calendario de llamadas es del closer; el setter no lo necesita (usa sus agenda cals).
+  if (prof.role === 'closer' && !calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
 
   // TZ de la org para cortar el día donde corresponde.
   let tz = 'America/Argentina/Buenos_Aires';
@@ -649,7 +649,7 @@ async function captureGhl(req, res, member, url) {
   const metrics = {};
 
   // Citas del día asignadas al closer (solo si tiene ghl_user_id vinculado).
-  if (prof.ghl_user_id) {
+  if (prof.role === 'closer' && prof.ghl_user_id) {
     let events = [];
     try {
       const { start, end } = tzDayRange(date, tz);
@@ -677,19 +677,42 @@ async function captureGhl(req, res, member, url) {
     metrics.no_shows = { value: noShows, source: 'ghl' };
   }
 
-  // Cierres y cash desde las ventas del tracker (fuente de verdad interna).
-  try {
-    const sr = await fetch(
-      SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(member.org_id)
-        + '&closer_id=eq.' + encodeURIComponent(targetId) + '&sale_date=eq.' + encodeURIComponent(date) + '&select=cash',
-      { headers: svcHeaders() }
-    );
-    const sales = await sr.json().catch(() => null);
-    if (Array.isArray(sales)) {
-      metrics.cierres = { value: sales.length, source: 'ventas' };
-      metrics.cash_nuevo = { value: sales.reduce((a, s) => a + (+s.cash || 0), 0), source: 'ventas' };
+  // Cierres y cash desde las ventas del tracker (fuente de verdad interna). Solo closer.
+  if (prof.role === 'closer') {
+    try {
+      const sr = await fetch(
+        SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(member.org_id)
+          + '&closer_id=eq.' + encodeURIComponent(targetId) + '&sale_date=eq.' + encodeURIComponent(date) + '&select=cash',
+        { headers: svcHeaders() }
+      );
+      const sales = await sr.json().catch(() => null);
+      if (Array.isArray(sales)) {
+        metrics.cierres = { value: sales.length, source: 'ventas' };
+        metrics.cash_nuevo = { value: sales.reduce((a, s) => a + (+s.cash || 0), 0), source: 'ventas' };
+      }
+    } catch { /* sin ventas legibles: se omiten esas métricas */ }
+  }
+
+  // Setter / triage: KPIs de conversaciones del día vía el motor completo (mismo del modo sombra).
+  if (prof.role !== 'closer' && prof.ghl_user_id) {
+    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(member.org_id) + '&kpi=eq._config&select=config');
+    const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
+    const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
+    let result;
+    try {
+      result = await computeMemberKpis({
+        ghlBase: GHL_BASE, token: creds.token, locationId: creds.locationId,
+        calendarId, tz, date,
+        member: { id: targetId, role: prof.role, ghl_user_id: prof.ghl_user_id },
+        salesRows: [], cuotasRows: [], bookingDomains, agendaCalendarIds,
+      });
+    } catch {
+      return sendJSON(res, 502, { error: 'No se pudieron calcular los KPIs de GHL' });
     }
-  } catch { /* sin ventas legibles: se omiten esas métricas */ }
+    for (const [k, v] of Object.entries(result.values || {})) {
+      metrics[k] = { value: v, source: 'ghl' };
+    }
+  }
 
   return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics });
 }
