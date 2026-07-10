@@ -27,6 +27,7 @@
       radial-gradient(1px 1px at 33% 82%, rgba(255,255,255,.25), transparent),
       radial-gradient(1px 1px at 92% 74%, rgba(255,255,255,.3), transparent)}
   .app{position:relative;z-index:1;display:grid;grid-template-columns:74px 1fr;min-height:100vh}
+  body.has-super-banner .app{padding-top:38px}
   a{color:inherit;text-decoration:none}
   button{font-family:inherit;cursor:pointer}
   input,select{font-family:inherit}
@@ -1520,6 +1521,7 @@ let IS_SUPER=false, PLAT_SETTINGS=null;
 // ORG_CREATED: credenciales del último alta — viven SOLO en memoria hasta que
 // se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
 let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
+let SUPER_HOME=null; // {id,role,name,org_id} del equipo propio mientras el super "entra" a otra org; null = estás en tu equipo
 // Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
 // resultados de la última búsqueda (para pickear por índice sin inyectar
 // datos de GHL en atributos onclick) + timer del debounce + estado del
@@ -1583,12 +1585,16 @@ function orgsCard(){
     tableBox=`<div class="empty">Sin organizaciones todavía.</div>`;
   } else {
     const rows=ORGS.map((o,i)=>{
+      const isHere=o.id===ME.org_id;
       let tr=`<tr>
       <td style="text-align:left">${esc(o.name||'—')}</td>
       <td>${+o.members_active||0}</td>
       <td style="text-align:left">${o.ghl_connected?esc(o.ghl_location_name||'Conectado'):'—'}</td>
       <td style="text-align:left">${(o.admins&&o.admins.length)?o.admins.map(a=>esc(a)).join(', '):'—'}</td>
-      <td><button class="btn ghost sm" onclick="toggleOrgPanel(${i})">${o.id===PLAT_M_ORG?'Cerrar':'Gestionar'}</button></td>
+      <td style="white-space:nowrap">
+        ${isHere?'<span class="tag ok" style="font-size:11px">Estás acá</span>':`<button class="btn ghost sm" onclick="enterOrgAsSuper(${i})">Entrar</button>`}
+        <button class="btn ghost sm" onclick="toggleOrgPanel(${i})">${o.id===PLAT_M_ORG?'Cerrar':'Gestionar'}</button>
+      </td>
     </tr>`;
       // Panel expandible debajo de la fila (una org a la vez). colspan = total
       // de columnas del thead (5).
@@ -2058,6 +2064,38 @@ function renderPlatform(){
   </div>`;
   VIEW.innerHTML = topbar('') + `<div style="margin-bottom:10px"><button class="btn ghost sm" onclick="go('dashboard')">← Volver al panel</button></div>` + `<div class="eyebrow">Plataforma</div><h2 class="view">Plataforma ${info('Configuración global de Maze Sales Tracker: API de agencia de HighLevel y alta de organizaciones. Solo la ve el equipo de Maze.')}</h2>
     ${pitCard}${orgsCard()}` + footer();
+}
+// ---------- Entrar a una org como super-admin (switch client-side) ----------
+// Cambia la org activa en el browser y recarga sus datos. La RLS (policies
+// _super, migración 018) permite leer/escribir cualquier org. Efímero: un
+// reload reconstruye ME desde el perfil propio y SUPER_HOME vuelve a null.
+window.enterOrgAsSuper=async(i)=>{
+  if(!IS_SUPER) return;
+  const o=ORGS&&ORGS[i]; if(!o||o.id===ME.org_id) return;
+  if(!SUPER_HOME) SUPER_HOME={...ME}; // guardar el equipo propio la 1ra vez
+  ME={id:ME.id, role:'admin', name:ME.name, org_id:o.id}; IS_ADMIN=true;
+  await loadFromSupabase();
+  state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
+  renderSuperBanner();
+  go('dashboard');
+  toast('Entraste a '+(o.name||'la organización'));
+};
+window.exitSuperView=async()=>{
+  if(!SUPER_HOME) return;
+  ME={...SUPER_HOME}; SUPER_HOME=null; IS_ADMIN = ME.role==='admin' || IS_SUPER;
+  await loadFromSupabase();
+  state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
+  renderSuperBanner();
+  go('dashboard');
+};
+function renderSuperBanner(){
+  let b=document.getElementById('superBanner');
+  if(!SUPER_HOME){ if(b) b.remove(); document.body.classList.remove('has-super-banner'); return; }
+  if(!b){ b=document.createElement('div'); b.id='superBanner'; document.body.appendChild(b); }
+  b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:400;display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 14px;background:#C5FF49;color:#0e0e10;font-size:13px;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.25)';
+  b.innerHTML=`<span>👁 Viendo <b>${esc(DB.team.name||'—')}</b> como super-admin</span>`+
+    `<button onclick="exitSuperView()" style="background:#0e0e10;color:#C5FF49;border:0;border-radius:8px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:12.5px">Volver a tu equipo</button>`;
+  document.body.classList.add('has-super-banner');
 }
 window.savePlatPit=async ()=>{
   const inp=document.getElementById('platPit');
