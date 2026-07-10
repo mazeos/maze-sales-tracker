@@ -1179,13 +1179,13 @@ function ghlAgendaCalendarsBlock(){
     inner=`<p style="color:var(--muted);font-size:13px;margin:0">Cargando calendarios…</p>`;
   } else if(GHL_CALS.error){
     inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.msg||'No se pudieron cargar los calendarios. Recargá la página para reintentar.')}</p>`;
-  } else if(!(GHL_CALS.calendars||[]).length){
-    inner=`<p style="color:var(--muted);font-size:13px;margin:0">${esc(GHL_CALS.hint||'Importá primero a tus closers desde Equipo desde HighLevel')}</p>`;
+  } else if(!(GHL_CALS.all_calendars||[]).length){
+    inner=`<p style="color:var(--muted);font-size:13px;margin:0">No hay calendarios en esta subcuenta de HighLevel.</p>`;
   } else {
     const marcados=new Set(GHL_CALS.agenda_calendar_ids||[]);
-    const items=GHL_CALS.calendars.map(c=>`<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;padding:2px 0">
+    const items=GHL_CALS.all_calendars.map(c=>`<label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;padding:2px 0">
       <input type="checkbox" class="ghl-agenda-cal" value="${esc(c.id)}" ${marcados.has(c.id)?'checked':''}>
-      <span>${esc(c.name)}${(c.closers&&c.closers.length)?` <span style="color:var(--muted)">· ${esc(c.closers.join(', '))}</span>`:''}</span>
+      <span>${esc(c.name)}</span>
     </label>`).join('');
     inner=`<p style="color:var(--muted);font-size:13px;margin:0 0 8px">Marcá los calendarios donde tus setters agendan llamadas — sus citas cuentan como agendas.</p>
       <div style="display:flex;flex-direction:column;gap:2px;margin:0 0 8px">${items}</div>

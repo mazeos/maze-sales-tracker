@@ -792,10 +792,12 @@ async function shadowTick() {
 }
 setInterval(shadowTick, 10 * 60 * 1000);
 
-// ---------- Calendarios GHL relevantes para la org (Fase 2.3) ----------
-// Lista los calendarios de la subcuenta GHL filtrados a los que atiende algún
-// closer YA sincronizado en el tracker (decisión de producto: no listar todos
-// los calendarios de la location, solo los relevantes al equipo de cierre).
+// ---------- Calendarios GHL de la org (Fase 2.3) ----------
+// Devuelve DOS listas de la subcuenta GHL:
+//  - `allCalendars`: TODOS los calendarios (para el multi-select de "agendas del
+//    setter" — el setter agenda en cualquier calendario, no depende de closers).
+//  - `calendars`: solo los atendidos por un closer YA sincronizado en el tracker
+//    (para el "Calendario de llamadas" del closer, que asocia ventas).
 // Recibe las creds ya resueltas (token vigente) y el org_id. Lanza Error en
 // fallas de red/status (el caller responde 502/500 genérico).
 async function listOrgCalendars(creds, orgId) {
@@ -814,11 +816,9 @@ async function listOrgCalendars(creds, orgId) {
     if (p.active !== false && p.ghl_user_id) closerByGhlId.set(p.ghl_user_id, p.name);
   }
 
-  // b. Sin closers sincronizados no hay nada que listar: cortar acá SIN llamar
-  //    a GHL (no gastar rate limit al pedo).
-  if (closerByGhlId.size === 0) return { calendars: [], sinClosers: true };
-
-  // c. Calendarios de la subcuenta (misma versión de API que los events).
+  // b. Calendarios de la subcuenta (misma versión de API que los events).
+  //    SIEMPRE se traen: el multi-select de agenda los necesita todos, aunque
+  //    la org no tenga closers sincronizados.
   const calRes = await ghlWithRetry(creds, (t) => fetch(
     GHL_BASE + '/calendars/?locationId=' + encodeURIComponent(creds.locationId),
     { headers: ghlHeaders(t, '2021-04-15') }
@@ -830,8 +830,11 @@ async function listOrgCalendars(creds, orgId) {
   const body = await calRes.json().catch(() => ({}));
   const all = Array.isArray(body && body.calendars) ? body.calendars : [];
 
-  // d. Solo calendarios con algún closer sincronizado en teamMembers.
-  //    Respuesta mínima: id/name/closers — jamás teamMembers crudos ni tokens.
+  // c. TODOS los calendarios (para agenda del setter): id/name, sin filtro.
+  const allCalendars = all.filter((c) => c && c.id).map((c) => ({ id: c.id, name: c.name || 'Sin nombre' }));
+
+  // d. Solo calendarios con algún closer sincronizado en teamMembers (para el
+  //    "Calendario de llamadas"). Respuesta mínima: id/name/closers.
   const calendars = [];
   for (const c of all) {
     if (!c || !c.id || !Array.isArray(c.teamMembers)) continue;
@@ -843,7 +846,7 @@ async function listOrgCalendars(creds, orgId) {
     if (!closers.length) continue;
     calendars.push({ id: c.id, name: c.name || 'Sin nombre', closers });
   }
-  return { calendars, sinClosers: false };
+  return { calendars, allCalendars, sinClosers: closerByGhlId.size === 0 };
 }
 
 // ---------- GET /api/ghl/calendars ----------
@@ -874,6 +877,7 @@ async function listGhlCalendars(req, res, admin) {
 
   const out = {
     calendars: listado.calendars,
+    all_calendars: listado.allCalendars,
     selected: (creds.integration && creds.integration.calendar_id) || null,
     selected_name: (creds.integration && creds.integration.calendar_name) || null,
     agenda_calendar_ids: agendaCalendarIds,
@@ -985,7 +989,7 @@ async function setGhlAgendaCalendars(req, res, admin) {
     } catch {
       return sendJSON(res, 502, { error: 'No se pudo hablar con HighLevel. Probá de nuevo.' });
     }
-    const validIds = new Set((listado.calendars || []).map((c) => c.id));
+    const validIds = new Set((listado.allCalendars || []).map((c) => c.id));
     const invalid = wanted.filter((id) => !validIds.has(id));
     if (invalid.length) return sendJSON(res, 400, { error: 'Uno o más calendarios no están disponibles' });
   }
