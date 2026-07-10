@@ -2139,9 +2139,12 @@ async function createOrg(req, res, sa) {
     generated = true;
   }
 
-  // Pre-vínculo de subcuenta (opcional): validaciones fail-fast ANTES de crear
-  // la org, así no se complica el rollback existente. JAMÁS se confía en el
-  // body: la location tiene que existir en la agencia y no estar ya vinculada.
+  // La subcuenta de HighLevel es OBLIGATORIA: toda org nace vinculada a una subcuenta.
+  if (!locationId) return sendJSON(res, 400, { error: 'Tenés que vincular una subcuenta de HighLevel a la organización' });
+
+  // Pre-vínculo de subcuenta: validaciones fail-fast ANTES de crear la org, así
+  // no se complica el rollback existente. JAMÁS se confía en el body: la location
+  // tiene que existir en la agencia y no estar ya vinculada.
   let locationName = null;
   if (locationId) {
     // 1. PIT de agencia configurado.

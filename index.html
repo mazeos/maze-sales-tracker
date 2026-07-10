@@ -1566,10 +1566,10 @@ function orgsCard(){
   // Si hay subcuenta elegida → chip fijado con ✕; si no → input con debounce
   // que pinta SOLO #platLocResults (nunca re-render completo: se pierde el foco).
   const locField=PLAT_LOC_SEL
-    ? `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+    ? `<div class="field"><label>Subcuenta de HighLevel</label>
         <div><button class="chip" type="button" onclick="clearPlatLoc()" data-tip="Quitar la subcuenta elegida"><span class="cbx-ava" style="width:22px;height:22px;font-size:10px">${esc(locInitials(PLAT_LOC_SEL.name))}</span> ${esc(PLAT_LOC_SEL.name)} <span class="k">${esc(locShortId(PLAT_LOC_SEL.id))}</span> ✕</button></div>
       </div>`
-    : `<div class="field"><label>Subcuenta de HighLevel (opcional)</label>
+    : `<div class="field"><label>Subcuenta de HighLevel</label>
         <div class="cbx-wrap" id="platLocWrap">
           <input class="inp" id="platLocQ" placeholder="Buscar subcuenta de tu agencia…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" oninput="platLocSearch(this.value)" onfocus="platLocFocus()" onkeydown="platLocKey(event)">
           <div class="cbx-panel" id="platLocResults" role="listbox" style="display:none"></div>
@@ -1692,6 +1692,7 @@ window.createOrg=async ()=>{
   if(!name){ toast('Tienes que poner el nombre de la organización'); return; }
   if(!adminName){ toast('Tienes que poner el nombre del admin'); return; }
   if(!adminEmail){ toast('Tienes que poner el email del admin'); return; }
+  if(!PLAT_LOC_SEL){ toast('Tenés que vincular una subcuenta de HighLevel'); return; }
   if(pass && pass.length<8){ toast('La contraseña tiene que tener al menos 8 caracteres'); return; }
   const { data:{ session } } = await sb.auth.getSession();
   if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
