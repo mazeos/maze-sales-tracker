@@ -954,7 +954,7 @@ window.autofillGhl=async()=>{
     const {data:{session}}=await sb.auth.getSession();
     if(!session){ fail('Tu sesión venció, volvé a entrar'); return; }
     const q=new URLSearchParams({date:state.capDate}); if(ME&&state.capMember!==ME.id) q.set('member_id',state.capMember);
-    const r=await fetch('/api/capture/ghl?'+q.toString(),{headers:{'Authorization':'Bearer '+session.access_token}});
+    const r=await fetch('/api/capture/ghl?'+q.toString()+superOrgQS(),{headers:{'Authorization':'Bearer '+session.access_token}});
     if(r.status===501){ if(btn) btn.style.display='none'; return; }
     const j=await r.json().catch(()=>null);
     if(!r.ok||!j||!j.metrics){ fail((j&&j.error)||'No se pudo traer de GHL, cargá a mano'); return; }
@@ -1097,7 +1097,7 @@ window.backfillTable=async()=>{
   const trae={};
   for(let i=0;i<days.length;i++){ const ds=days[i]; const p=document.getElementById('bfProg'); if(p) p.textContent=`Día ${i+1} de ${days.length} · ${ds}`;
     try{ const q=new URLSearchParams({date:ds,member_id:state.tblMember});
-      const r=await fetch('/api/capture/ghl?'+q,{headers:{'Authorization':'Bearer '+session.access_token}});
+      const r=await fetch('/api/capture/ghl?'+q+superOrgQS(),{headers:{'Authorization':'Bearer '+session.access_token}});
       if(r.ok){ const j=await r.json(); const m={}; for(const k in (j.metrics||{})) m[k]=+j.metrics[k].value||0; trae[ds]=m; }
     }catch(e){}
   }
@@ -1167,7 +1167,7 @@ async function loadGhlStatus(){
   try{
     const { data:{ session } } = await sb.auth.getSession();
     if(!session){ GHL_STATUS={connected:false,error:true}; return; }
-    const res=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const res=await fetch('/api/integrations/ghl'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
     const data=await res.json().catch(()=>null);
     GHL_STATUS=(res.ok && data) ? data : {connected:false,error:true};
   }catch(e){ GHL_STATUS={connected:false,error:true}; }
@@ -2088,6 +2088,9 @@ window.exitSuperView=async()=>{
   renderSuperBanner();
   go('dashboard');
 };
+// En modo visita, apuntar las requests a la mini-API a la org visitada.
+function superOrgQS(){ return SUPER_HOME ? ('&org_id='+encodeURIComponent(ME.org_id)) : ''; }
+function superOrgBody(o){ return SUPER_HOME ? Object.assign({}, o, {org_id:ME.org_id}) : o; }
 function renderSuperBanner(){
   let b=document.getElementById('superBanner');
   if(!SUPER_HOME){ if(b) b.remove(); document.body.classList.remove('has-super-banner'); return; }
@@ -2283,7 +2286,7 @@ window.runShadow=async()=>{
   const btn=document.getElementById('shadowBtn'); if(btn){ btn.disabled=true; btn.textContent='Corriendo…'; }
   try{
     const {data:{session}}=await sb.auth.getSession();
-    const r=await fetch('/api/shadow/run',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({})});
+    const r=await fetch('/api/shadow/run',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(superOrgBody({}))});
     const j=await r.json().catch(()=>null);
     if(!r.ok){ toast((j&&j.error)||'Falló la corrida'); }
     else toast(`Sombra corrida: ${j.rows} valores de ${j.members} miembros`);
@@ -2434,7 +2437,7 @@ async function loadGhlLeads(){
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(!session){ manualMode(false); return; }
-    const r=await fetch('/api/ghl/leads',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const r=await fetch('/api/ghl/leads'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
     if(!r.ok){ manualMode(true); return; }
     j=await r.json();
   }catch(e){ manualMode(true); return; }
@@ -2475,9 +2478,9 @@ window.addSale=async()=>{
       const closer=DB.members.find(m=>m.id===row.closer_id);
       const {data:{session}}=await sb.auth.getSession();
       const r=await fetch('/api/sales/ghl',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},
-        body:JSON.stringify({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
+        body:JSON.stringify(superOrgBody({contactId:ghlId,clienteNombre:cliente,programa:row.programa,facturado:row.facturado,cash:row.cash,
           cuotas:row.cuotas,metodo:row.metodo,fueReserva:fueReserva,reserva:row.reserva,primerPago:row.primer_pago,
-          vendedor:closer?closer.name:''})});
+          vendedor:closer?closer.name:''}))});
       const j=await r.json();
       if(j.ok){ toast(fueReserva?'Reserva registrada — tag "reserva" aplicado 🔒':'Venta registrada — onboarding disparado 🎉'); }
       else { toast('Venta guardada, pero GHL falló: revisá el contacto'); }
@@ -2497,7 +2500,7 @@ async function loadGhlLocation(){
   GHL_LOC_ASKED=true;
   try{
     const {data:{session}}=await sb.auth.getSession(); if(!session) return;
-    const r=await fetch('/api/integrations/ghl',{headers:{'Authorization':'Bearer '+session.access_token}});
+    const r=await fetch('/api/integrations/ghl'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
     if(!r.ok) return;
     const j=await r.json();
     if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); else if(state.view==='team') renderTeam(); }
