@@ -1407,7 +1407,7 @@ window.loadGhlUsers=async ()=>{
   if(state.view==='team') renderTeam();
   let res, data;
   try{
-    res=await fetch('/api/ghl/users',{headers:{'Authorization':'Bearer '+session.access_token}});
+    res=await fetch('/api/ghl/users?_=1'+superOrgQS(),{headers:{'Authorization':'Bearer '+session.access_token}});
     data=await res.json().catch(()=>({}));
   }catch(e){
     GHL_USERS_LOADING=false;
@@ -1435,7 +1435,7 @@ window.importGhlUser=async (ghlUserId)=>{
   if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
   let res, data;
   try{
-    res=await fetch('/api/ghl/users/import',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify({ghl_user_id:ghlUserId, role})});
+    res=await fetch('/api/ghl/users/import',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token},body:JSON.stringify(superOrgBody({ghl_user_id:ghlUserId, role}))});
     data=await res.json().catch(()=>({}));
   }catch(e){ toast('No se pudo conectar con el servidor'); return; }
   if(res.ok){
@@ -2180,8 +2180,8 @@ function renderTeam(){
   // De visita en otra org: la gestión de miembros y la conexión de HighLevel pegan
   // a la mini-API server-side, que resolvería la org madre del super, no la visitada.
   // Se ocultan y se reemplazan por un hint; el resto (RLS/supabase-js) sigue igual.
-  const visitingHint=`<div class="section"><div class="eyebrow">Miembros y HighLevel</div>
-      <p style="color:var(--muted);font-size:13px;margin:0">Estás de visita en este equipo. La gestión de miembros y la conexión de HighLevel se hacen desde Plataforma → Gestionar.</p>
+  const visitingHint=`<div class="section"><div class="eyebrow">Agregar miembro</div>
+      <p style="color:var(--muted);font-size:13px;margin:0">Estás de visita en este equipo. El equipo se sincroniza desde HighLevel — importá miembros desde "Equipo desde HighLevel". El alta y la baja manual se hacen desde Plataforma → Gestionar.</p>
     </div>`;
   const addMemberBox = !IS_ADMIN ? '' : (visiting ? visitingHint : ((GHL_STATUS && GHL_STATUS.connected) ? addMemberHint : addMemberForm));
   VIEW.innerHTML = topbar('') + `<div style="margin-bottom:10px"><button class="btn ghost sm" onclick="go('dashboard')">← Volver al panel</button></div>` + `<div class="eyebrow">Configuraciones</div><h2 class="view">Configuraciones ${info('Editá los nombres, roles y la comisión de cada persona, la zona horaria, y corregí datos cargados.')}</h2>
@@ -2200,7 +2200,7 @@ function renderTeam(){
     </div>
     <div class="section"><div class="eyebrow">Miembros del equipo</div><div class="list">${list}</div></div>
     ${addMemberBox}
-    ${visiting ? '' : `${ghlCard()}${ghlTeamCard()}`}${IS_ADMIN ? calibracionCard() : ''}` + footer();
+    ${visiting ? ghlTeamCard() : `${ghlCard()}${ghlTeamCard()}`}${IS_ADMIN ? calibracionCard() : ''}` + footer();
 }
 
 // ---------- Panel de calibración (auto-carga en sombra, Fase A) ----------
