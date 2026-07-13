@@ -1372,7 +1372,7 @@ function ghlTeamCard(){
     autoLinkedBox=`<div class="admin-lock">🔗 <span>Se ${n===1?'vinculó automáticamente':'vincularon automáticamente'} con su usuario de HighLevel: <b>${GHL_AUTO_LINKED.map(x=>esc(x)).join(', ')}</b></span></div>`;
   }
   // (b) Botón de carga / tabla de usuarios GHL.
-  const loadBtn=(cls)=>`<button class="btn ${cls}" onclick="loadGhlUsers()" ${GHL_USERS_LOADING?'disabled':''}>${GHL_USERS_LOADING?'Cargando…':(GHL_USERS===null?'Cargar usuarios de HighLevel':'Actualizar lista')}</button>`;
+  const loadBtn=(cls)=>`<button class="btn ${cls}" onclick="openGhlSyncConfirm()" ${GHL_USERS_LOADING?'disabled':''}>${GHL_USERS_LOADING?'Cargando…':(GHL_USERS===null?'Cargar usuarios de HighLevel':'Actualizar lista')}</button>`;
   let listBox='';
   if(GHL_USERS===null){
     listBox=`<p style="color:var(--muted);font-size:13px;margin:0 0 12px">Traé los usuarios de tu subcuenta y elegí a quiénes importar como miembros del tracker, con el rol que les corresponda.</p>${loadBtn('')}`;
@@ -1470,6 +1470,38 @@ window.importGhlUser=async (ghlUserId)=>{
     toast(data.error || 'No se pudo importar');
   }
 };
+
+// ---------- Confirmar sync con HighLevel (GET /api/ghl/users NO es de solo
+// lectura: reconcilia y escribe) ----------
+// Modal lazy patrón drill-overlay (igual que openDeleteOrg): antes de correr la
+// sync hay que avisar qué va a pasar, porque el aviso de bajas (removedBox) recién
+// aparece DESPUÉS de que ya ocurrieron. Sin confirm()/alert() nativos, siguiendo
+// el mismo patrón visual que el resto de la app. En modo visita se muestra el
+// nombre de la org visitada (DB.team.name, ya cargada para esa org) — el super
+// puede estar operando sobre el equipo de un cliente sin darse cuenta.
+window.openGhlSyncConfirm=()=>{
+  if(!IS_ADMIN || GHL_USERS_LOADING) return;
+  const orgName=(DB&&DB.team&&DB.team.name)||'tu equipo';
+  const visiting=SUPER_HOME!==null;
+  let ov=document.getElementById('ghlSyncOv');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='ghlSyncOv'; ov.className='drill-overlay';
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeGhlSyncConfirm(); });
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML=`<div class="drill" style="max-width:440px">
+    <button class="drill-x" onclick="closeGhlSyncConfirm()">✕</button>
+    <div class="drill-head"><div><div class="eyebrow">Sincronizar con HighLevel</div><h3>Vas a sincronizar el equipo de ${esc(orgName)}</h3></div></div>
+    <p class="drill-def">A partir de acá HighLevel manda: se vincula automáticamente por email a quien coincida, y se da de baja (deja de poder entrar al tracker) a cualquier miembro que ya no esté en tu subcuenta de HighLevel.${visiting?' Estás en modo visita: esto opera sobre el equipo de este cliente, no el tuyo.':''}</p>
+    <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:14px">
+      <button class="btn ghost sm" type="button" onclick="closeGhlSyncConfirm()">Cancelar</button>
+      <button class="btn sm" onclick="confirmGhlSync()">Sincronizar</button>
+    </div>
+  </div>`;
+  ov.style.display='flex';
+};
+window.closeGhlSyncConfirm=()=>{ const ov=document.getElementById('ghlSyncOv'); if(ov) ov.style.display='none'; };
+window.confirmGhlSync=()=>{ closeGhlSyncConfirm(); loadGhlUsers(); };
 
 // ---------- Cambiar mi contraseña (cualquier usuario logueado) ----------
 // Modal lazy con el patrón del drill-overlay: fondo oscuro, card centrada,
