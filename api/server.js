@@ -1694,13 +1694,14 @@ async function importGhlUser(req, res, admin) {
   const parsed = await readJSONBody(req);
   if (!parsed.ok) return sendJSON(res, 400, { error: 'El cuerpo de la solicitud no es un JSON válido' });
   const body = parsed.data || {};
+  const orgId = effectiveOrg(admin, body.org_id);
   const ghlUserId = typeof body.ghl_user_id === 'string' ? body.ghl_user_id.trim() : '';
   const role = typeof body.role === 'string' ? body.role.trim() : '';
   if (!ghlUserId) return sendJSON(res, 400, { error: 'Falta el usuario de HighLevel a importar' });
   // Acá 'admin' SÍ es un rol válido (distinto de /api/members): se puede importar un admin.
   if (!GHL_IMPORT_ROLES.includes(role)) return sendJSON(res, 400, { error: 'El rol tiene que ser setter, triage, closer o admin' });
 
-  const integration = await getIntegration(admin.org_id);
+  const integration = await getIntegration(orgId);
   // Una fila pending (sin access_token) todavía no puede importar usuarios.
   if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
@@ -1721,7 +1722,7 @@ async function importGhlUser(req, res, admin) {
   let profs;
   try {
     const r = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(admin.org_id)
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
         + '&select=id,name,role,active,ghl_user_id',
       { headers: svcHeaders() }
     );
@@ -1816,7 +1817,7 @@ async function importGhlUser(req, res, admin) {
     try {
       const r = await fetch(
         SUPABASE_URL + '/rest/v1/st_profiles?user_id=eq.' + encodeURIComponent(uid)
-          + '&org_id=eq.' + encodeURIComponent(admin.org_id)
+          + '&org_id=eq.' + encodeURIComponent(orgId)
           + '&select=id,org_id,name,active,ghl_user_id',
         { headers: svcHeaders() }
       );
@@ -1833,7 +1834,7 @@ async function importGhlUser(req, res, admin) {
         const insRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
           method: 'POST',
           headers: svcHeaders({ 'Prefer': 'return=minimal' }),
-          body: JSON.stringify({ user_id: uid, org_id: admin.org_id, name, role, commission: 0, ghl_user_id: ghlUserId }),
+          body: JSON.stringify({ user_id: uid, org_id: orgId, name, role, commission: 0, ghl_user_id: ghlUserId }),
         });
         if (insRes.status >= 300) return sendJSON(res, 502, { error: 'No se pudo crear la membresía' });
       } catch {
@@ -1883,7 +1884,7 @@ async function importGhlUser(req, res, admin) {
       adoptRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
         method: 'POST',
         headers: svcHeaders({ 'Prefer': 'return=representation' }),
-        body: JSON.stringify({ id: uid, user_id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+        body: JSON.stringify({ id: uid, user_id: uid, org_id: orgId, name, role, ghl_user_id: ghlUserId, commission: 0 }),
       });
       adoptRows = await adoptRes.json().catch(() => null);
     } catch {
@@ -1896,7 +1897,7 @@ async function importGhlUser(req, res, admin) {
     const adopted = Array.isArray(adoptRows) ? adoptRows[0] : adoptRows;
     console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} email_dup_adopted uid=${uid} role=${role} ghl=${ghlUserId} -> 200`);
     return sendJSON(res, 200, {
-      ...(adopted || { id: uid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0, active: true }),
+      ...(adopted || { id: uid, org_id: orgId, name, role, ghl_user_id: ghlUserId, commission: 0, active: true }),
       existing_account: true,
     });
   }
@@ -1912,7 +1913,7 @@ async function importGhlUser(req, res, admin) {
     profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
       method: 'POST',
       headers: svcHeaders({ 'Prefer': 'return=representation' }),
-      body: JSON.stringify({ id: newUid, user_id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0 }),
+      body: JSON.stringify({ id: newUid, user_id: newUid, org_id: orgId, name, role, ghl_user_id: ghlUserId, commission: 0 }),
     });
     profRows = await profRes.json().catch(() => null);
   } catch {
@@ -1931,7 +1932,7 @@ async function importGhlUser(req, res, admin) {
 
   const created = Array.isArray(profRows) ? profRows[0] : profRows;
   console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} created uid=${newUid} role=${role} ghl=${ghlUserId} -> 200`);
-  return sendJSON(res, 200, created || { id: newUid, org_id: admin.org_id, name, role, ghl_user_id: ghlUserId, commission: 0, active: true });
+  return sendJSON(res, 200, created || { id: newUid, org_id: orgId, name, role, ghl_user_id: ghlUserId, commission: 0, active: true });
 }
 
 // ---------- POST /api/me/password ----------
