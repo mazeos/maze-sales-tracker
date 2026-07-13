@@ -1525,8 +1525,9 @@ function ghlUserName(u) {
 //   3. Desvinculados: perfil importado cuyo usuario ya no está en la subcuenta
 //      (o figura deleted) → baja automática (active=false + ban).
 // Los perfiles con role='admin' NUNCA se dan de baja automáticamente.
-async function listGhlUsers(req, res, admin) {
-  const integration = await getIntegration(admin.org_id);
+async function listGhlUsers(req, res, admin, url) {
+  const orgId = effectiveOrg(admin, url.searchParams.get('org_id'));
+  const integration = await getIntegration(orgId);
   // Una fila pending (sin access_token) todavía no puede listar usuarios.
   if (!integration || !integration.access_token) return sendJSON(res, 409, { error: 'Conectá tu cuenta de HighLevel primero' });
 
@@ -1541,7 +1542,7 @@ async function listGhlUsers(req, res, admin) {
   let profs;
   try {
     const r = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(admin.org_id)
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
         + '&select=id,name,role,active,ghl_user_id',
       { headers: svcHeaders() }
     );
@@ -1582,18 +1583,18 @@ async function listGhlUsers(req, res, admin) {
         { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ ghl_user_id: u.id }) }
       );
       if (patchRes.status < 200 || patchRes.status >= 300) {
-        console.error(`[api] GET /api/ghl/users org=${admin.org_id} autolink_fail id=${p.id} status=${patchRes.status}`);
+        console.error(`[api] GET /api/ghl/users org=${orgId} autolink_fail id=${p.id} status=${patchRes.status}`);
         continue;
       }
     } catch {
-      console.error(`[api] GET /api/ghl/users org=${admin.org_id} autolink_fetch_fail id=${p.id}`);
+      console.error(`[api] GET /api/ghl/users org=${orgId} autolink_fetch_fail id=${p.id}`);
       continue;
     }
     p.ghl_user_id = u.id;
     byGhlId.set(u.id, p);
     emailToProfile.delete(email);
     auto_linked.push(p.name);
-    console.log(`[api] GET /api/ghl/users org=${admin.org_id} autolink id=${p.id} name=${p.name} ghl_user_id=${u.id}`);
+    console.log(`[api] GET /api/ghl/users org=${orgId} autolink id=${p.id} name=${p.name} ghl_user_id=${u.id}`);
   }
 
   // Estado de cada usuario GHL respecto del tracker.
@@ -1631,11 +1632,11 @@ async function listGhlUsers(req, res, admin) {
         { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
       );
       if (patchRes.status < 200 || patchRes.status >= 300) {
-        console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fail id=${p.id} status=${patchRes.status}`);
+        console.error(`[api] GET /api/ghl/users org=${orgId} baja_fail id=${p.id} status=${patchRes.status}`);
         continue;
       }
     } catch {
-      console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fetch_fail id=${p.id}`);
+      console.error(`[api] GET /api/ghl/users org=${orgId} baja_fetch_fail id=${p.id}`);
       continue;
     }
     try {
@@ -1646,7 +1647,7 @@ async function listGhlUsers(req, res, admin) {
       });
     } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
     p.active = false; // consistencia del objeto local con la DB
-    console.log(`[api] GET /api/ghl/users org=${admin.org_id} baja_auto id=${p.id} name=${p.name} (huérfano manual con GHL conectado)`);
+    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} (huérfano manual con GHL conectado)`);
     removed.push(p.name);
   }
 
@@ -1660,11 +1661,11 @@ async function listGhlUsers(req, res, admin) {
         { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
       );
       if (patchRes.status < 200 || patchRes.status >= 300) {
-        console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fail id=${p.id} status=${patchRes.status}`);
+        console.error(`[api] GET /api/ghl/users org=${orgId} baja_fail id=${p.id} status=${patchRes.status}`);
         continue;
       }
     } catch {
-      console.error(`[api] GET /api/ghl/users org=${admin.org_id} baja_fetch_fail id=${p.id}`);
+      console.error(`[api] GET /api/ghl/users org=${orgId} baja_fetch_fail id=${p.id}`);
       continue;
     }
     try {
@@ -1674,7 +1675,7 @@ async function listGhlUsers(req, res, admin) {
         body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
       });
     } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
-    console.log(`[api] GET /api/ghl/users org=${admin.org_id} baja_auto id=${p.id} name=${p.name} (ya no está en GHL)`);
+    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} (ya no está en GHL)`);
     removed.push(p.name);
   }
 
@@ -2966,7 +2967,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/api/ghl/users') {
       const admin = await requireAdmin(req);
       if (!admin.ok) return sendJSON(res, admin.status, { error: admin.error });
-      return listGhlUsers(req, res, admin);
+      return listGhlUsers(req, res, admin, url);
     }
 
     if (req.method === 'POST' && path === '/api/ghl/users/import') {
