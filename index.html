@@ -1164,27 +1164,33 @@ let GHL_CALS=null, GHL_CALS_LOADING=false;
 async function loadGhlStatus(){
   if(!IS_ADMIN || GHL_LOADING) return;
   GHL_LOADING=true;
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await
   try{
     const { data:{ session } } = await sb.auth.getSession();
+    if(epoch!==ORG_EPOCH) return; // cambiamos de org mientras esperábamos la sesión: descartar
     if(!session){ GHL_STATUS={connected:false,error:true}; return; }
     const res=await fetch('/api/integrations/ghl'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
     const data=await res.json().catch(()=>null);
+    if(epoch!==ORG_EPOCH) return; // la org cambió mientras volaba el fetch: es de la org vieja, no pisar la nueva
     GHL_STATUS=(res.ok && data) ? data : {connected:false,error:true};
-  }catch(e){ GHL_STATUS={connected:false,error:true}; }
-  finally{ GHL_LOADING=false; if(state.view==='team') renderTeam(); }
+  }catch(e){ if(epoch===ORG_EPOCH) GHL_STATUS={connected:false,error:true}; }
+  finally{ GHL_LOADING=false; if(epoch===ORG_EPOCH && state.view==='team') renderTeam(); }
 }
 // Carga lazy de los calendarios elegibles (mismo patrón que loadGhlStatus).
 async function loadGhlCalendars(){
   if(!IS_ADMIN || GHL_CALS_LOADING) return;
   GHL_CALS_LOADING=true;
+  const epoch=ORG_EPOCH;
   try{
     const { data:{ session } } = await sb.auth.getSession();
+    if(epoch!==ORG_EPOCH) return;
     if(!session){ GHL_CALS={error:true,msg:''}; return; }
     const res=await fetch('/api/ghl/calendars',{headers:{'Authorization':'Bearer '+session.access_token}});
     const data=await res.json().catch(()=>null);
+    if(epoch!==ORG_EPOCH) return;
     GHL_CALS=(res.ok && data) ? data : {error:true, msg:(data&&data.error)||''};
-  }catch(e){ GHL_CALS={error:true,msg:''}; }
-  finally{ GHL_CALS_LOADING=false; if(state.view==='team') renderTeam(); }
+  }catch(e){ if(epoch===ORG_EPOCH) GHL_CALS={error:true,msg:''}; }
+  finally{ GHL_CALS_LOADING=false; if(epoch===ORG_EPOCH && state.view==='team') renderTeam(); }
 }
 // Sub-bloque "Calendario de llamadas" de la card conectada (solo admin).
 function ghlCalendarBlock(){
@@ -1412,7 +1418,9 @@ window.copyGhlAccessCode=async ()=>{
 };
 window.loadGhlUsers=async ()=>{
   if(!IS_ADMIN || GHL_USERS_LOADING) return;
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await (caso reproducible del hallazgo)
   const { data:{ session } } = await sb.auth.getSession();
+  if(epoch!==ORG_EPOCH) return; // volviste/entraste a otra org mientras pedíamos la sesión: descartar
   if(!session){ toast('Tu sesión venció, vuelve a entrar'); return; }
   GHL_USERS_LOADING=true;
   if(state.view==='team') renderTeam();
@@ -1422,11 +1430,11 @@ window.loadGhlUsers=async ()=>{
     data=await res.json().catch(()=>({}));
   }catch(e){
     GHL_USERS_LOADING=false;
-    toast('No se pudo conectar con el servidor');
-    if(state.view==='team') renderTeam();
+    if(epoch===ORG_EPOCH){ toast('No se pudo conectar con el servidor'); if(state.view==='team') renderTeam(); }
     return;
   }
   GHL_USERS_LOADING=false;
+  if(epoch!==ORG_EPOCH) return; // la respuesta es de la org vieja (ej: GET a HighLevel tardó y ya volviste a tu equipo): no pisar
   if(res.ok){
     GHL_USERS=data.users||[];
     GHL_REMOVED=data.removed||[];
@@ -1533,6 +1541,13 @@ let IS_SUPER=false, PLAT_SETTINGS=null;
 // se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
 let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
 let SUPER_HOME=null; // {id,role,name,org_id} del equipo propio mientras el super "entra" a otra org; null = estás en tu equipo
+// Guardia de época: enterOrgAsSuper()/exitSuperView() la incrementan junto con la
+// invalidación de las globales cacheadas por org. Cada loader que escribe una de esas
+// globales captura ORG_EPOCH antes de su primer await y, al volver de cada await,
+// descarta la respuesta si ORG_EPOCH ya cambió — así un fetch en vuelo de la org vieja
+// nunca pisa el estado de la org nueva. Para un usuario que nunca visita otra org,
+// ORG_EPOCH no cambia nunca y el comportamiento es exactamente el de siempre.
+let ORG_EPOCH=0;
 // Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
 // resultados de la última búsqueda (para pickear por índice sin inyectar
 // datos de GHL en atributos onclick) + timer del debounce + estado del
@@ -2087,6 +2102,7 @@ window.enterOrgAsSuper=async(i)=>{
   ME={id:ME.id, role:'admin', name:ME.name, org_id:o.id}; IS_ADMIN=true;
   // Invalidar todo el estado de HighLevel cacheado: es de la org anterior, no de la visitada.
   // Ningún dato de una org puede sobrevivir al cambio a otra.
+  ORG_EPOCH++; // cierra la puerta a cualquier fetch en vuelo de la org anterior (guardia de época)
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
   await loadFromSupabase();
@@ -2099,6 +2115,7 @@ window.exitSuperView=async()=>{
   if(!SUPER_HOME) return;
   ME={...SUPER_HOME}; SUPER_HOME=null; IS_ADMIN = ME.role==='admin' || IS_SUPER;
   // Invalidar el estado de HighLevel: no puede arrastrarse desde la org visitada.
+  ORG_EPOCH++; // guardia de época: descarta cualquier fetch en vuelo de la org visitada
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
   await loadFromSupabase();
@@ -2225,12 +2242,15 @@ function renderTeam(){
 let SHADOW=null, SHADOW_LOADING=false, KPI_CFG=null;
 async function loadShadow(){
   if(SHADOW_LOADING) return; SHADOW_LOADING=true;
+  const epoch=ORG_EPOCH; // capturada antes del 1er await, con ME.org_id de la org actual ya fijado en la query
   const desde=dstr(new Date(Date.now()-14*86400000));
   const [sm,kc]=await Promise.all([
     sb.from('st_shadow_metrics').select('*').eq('org_id',ME.org_id).gte('metric_date',desde),
     sb.from('st_kpi_config').select('*').eq('org_id',ME.org_id),
   ]);
-  SHADOW=sm.data||[]; KPI_CFG=kc.data||[]; SHADOW_LOADING=false;
+  SHADOW_LOADING=false;
+  if(epoch!==ORG_EPOCH) return; // la org cambió mientras esperábamos: son datos de la org vieja
+  SHADOW=sm.data||[]; KPI_CFG=kc.data||[];
   if(state.view==='team') renderTeam();
 }
 // Recap del día: resumen legible por miembro de lo que midió el motor HOY,
@@ -2444,7 +2464,9 @@ function mini(l,v){ return `<div class="mini"><div class="l">${l}</div><div clas
 let GHL_LEADS=[];
 async function loadGhlLeads(){
   const sel=document.getElementById('s_lead'); if(!sel) return;
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await
   const manualMode=(showHint)=>{
+    if(epoch!==ORG_EPOCH) return; // la org cambió mientras esperábamos: no tocar el estado de la org nueva
     GHL_LEADS=[];
     const lw=document.getElementById('s_lead_wrap'); if(lw) lw.style.display='none';
     const cw=document.getElementById('s_cliente_wrap'); if(cw) cw.style.display='';
@@ -2454,11 +2476,14 @@ async function loadGhlLeads(){
   let j=null;
   try{
     const {data:{session}}=await sb.auth.getSession();
+    if(epoch!==ORG_EPOCH) return;
     if(!session){ manualMode(false); return; }
     const r=await fetch('/api/ghl/leads'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
+    if(epoch!==ORG_EPOCH) return;
     if(!r.ok){ manualMode(true); return; }
     j=await r.json();
-  }catch(e){ manualMode(true); return; }
+  }catch(e){ if(epoch===ORG_EPOCH) manualMode(true); return; }
+  if(epoch!==ORG_EPOCH) return;
   if(!j || !j.leads || !j.leads.length){ manualMode(true); return; }
   GHL_LEADS=j.leads;
   const fmt=(c)=>{ const d=String(c.cita||'').slice(0,16).replace('T',' '); return `${c.name}${d?' · '+d:''}`; };
@@ -2516,11 +2541,14 @@ let GHL_LOC=null, GHL_LOC_ASKED=false;
 async function loadGhlLocation(){
   if(GHL_LOC_ASKED||!IS_ADMIN) return;
   GHL_LOC_ASKED=true;
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await
   try{
     const {data:{session}}=await sb.auth.getSession(); if(!session) return;
+    if(epoch!==ORG_EPOCH) return; // cambiamos de org mientras pedíamos la sesión: descartar
     const r=await fetch('/api/integrations/ghl'+(SUPER_HOME?('?org_id='+encodeURIComponent(ME.org_id)):''),{headers:{'Authorization':'Bearer '+session.access_token}});
     if(!r.ok) return;
     const j=await r.json();
+    if(epoch!==ORG_EPOCH) return; // la org cambió mientras volaba el fetch: no pisar GHL_LOC de la org nueva
     if(j&&j.location_id){ GHL_LOC=j.location_id; if(state.view==='caja') renderCaja(); else if(state.view==='team') renderTeam(); }
   }catch(e){}
 }
