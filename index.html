@@ -2088,6 +2088,7 @@ window.enterOrgAsSuper=async(i)=>{
   // Invalidar todo el estado de HighLevel cacheado: es de la org anterior, no de la visitada.
   // Ningún dato de una org puede sobrevivir al cambio a otra.
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
+  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
@@ -2099,6 +2100,7 @@ window.exitSuperView=async()=>{
   ME={...SUPER_HOME}; SUPER_HOME=null; IS_ADMIN = ME.role==='admin' || IS_SUPER;
   // Invalidar el estado de HighLevel: no puede arrastrarse desde la org visitada.
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
+  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
