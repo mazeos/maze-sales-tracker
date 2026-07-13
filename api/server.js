@@ -1514,6 +1514,64 @@ function ghlUserName(u) {
   return u.name || [u.firstName, u.lastName].filter(Boolean).join(' ');
 }
 
+// Da de baja UN perfil de la org: soft-delete SIEMPRE (active=false, scoped a
+// la org — no toca otras orgs) y ban en GoTrue SOLO si el auth user detrás no
+// tiene NINGÚN OTRO perfil activo en NINGUNA otra org. El GoTrue es COMPARTIDO
+// entre orgs y entre apps (tracker, CallIQ, etc.): banear sin este chequeo
+// saca a la persona del login de TODO por una reconciliación de una sola org.
+// `authUid` = p.user_id (columna del auth uid desde la migración 013, donde
+// `st_profiles.id` pasó a ser gen_random_uuid()); fallback a p.id para
+// perfiles viejos donde user_id vino null (ahí id==user_id por construcción).
+// Fail-safe: si el chequeo cross-org falla por red, NO se banea (mejor un ban
+// de menos que sacarle a alguien el acceso a otra org/app por error).
+// Devuelve true si el soft-delete se aplicó (el caller lo cuenta como
+// "removido" de esta org); el ban es best-effort y no cambia el resultado.
+async function bajaPerfil(p, orgId, motivo) {
+  try {
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
+      { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
+    );
+    if (patchRes.status < 200 || patchRes.status >= 300) {
+      console.error(`[api] GET /api/ghl/users org=${orgId} baja_fail id=${p.id} status=${patchRes.status}`);
+      return false;
+    }
+  } catch {
+    console.error(`[api] GET /api/ghl/users org=${orgId} baja_fetch_fail id=${p.id}`);
+    return false;
+  }
+  p.active = false; // consistencia del objeto local con la DB
+
+  const authUid = p.user_id || p.id;
+  let otherActive = true; // fail-safe: ante duda (error de red) NO banear
+  try {
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/st_profiles?user_id=eq.' + encodeURIComponent(authUid)
+        + '&org_id=neq.' + encodeURIComponent(orgId)
+        + '&active=eq.true&select=id&limit=1',
+      { headers: svcHeaders() }
+    );
+    if (r.status === 200) {
+      const rows = await r.json().catch(() => null);
+      otherActive = Array.isArray(rows) && rows.length > 0;
+    }
+  } catch { /* otherActive queda true: fail-safe, no banear */ }
+
+  if (otherActive) {
+    console.log(`[api] GET /api/ghl/users org=${orgId} baja_sin_ban id=${p.id} name=${p.name} ${motivo} (tiene perfiles activos en otra org, GoTrue es compartido)`);
+  } else {
+    try {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(authUid), {
+        method: 'PUT',
+        headers: svcHeaders(),
+        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
+      });
+    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
+    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} ${motivo}`);
+  }
+  return true;
+}
+
 // ---------- GET /api/ghl/users ----------
 // Lista los usuarios de la subcuenta GHL de la org con su estado respecto del
 // tracker (nuevo / vinculable / importado / inactivo) y reconcilia TOTAL: con
@@ -1543,7 +1601,7 @@ async function listGhlUsers(req, res, admin, url) {
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
-        + '&select=id,name,role,active,ghl_user_id',
+        + '&select=id,name,role,active,ghl_user_id,user_id',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los perfiles del equipo' });
@@ -1554,11 +1612,14 @@ async function listGhlUsers(req, res, admin, url) {
   if (!Array.isArray(profs)) profs = [];
 
   // Emails SOLO de los perfiles sin ghl_user_id (para detectar "vinculable").
+  // authUid: desde la migración 013 el uid de auth vive en `user_id`, no en
+  // `id` (que ahora es gen_random_uuid()); fallback a `id` para perfiles
+  // viejos donde `user_id` vino null.
   const emailCache = new Map();
   const emailToProfile = new Map();
   for (const p of profs) {
     if (p.ghl_user_id) continue;
-    const email = await getAuthEmail(p.id, emailCache);
+    const email = await getAuthEmail(p.user_id || p.id, emailCache);
     if (email && !emailToProfile.has(email)) emailToProfile.set(email, p);
   }
 
@@ -1626,28 +1687,8 @@ async function listGhlUsers(req, res, admin, url) {
   for (const p of profs) {
     const orphan = p.active !== false && !p.ghl_user_id && p.role !== 'admin';
     if (!orphan) continue;
-    try {
-      const patchRes = await fetch(
-        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
-        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
-      );
-      if (patchRes.status < 200 || patchRes.status >= 300) {
-        console.error(`[api] GET /api/ghl/users org=${orgId} baja_fail id=${p.id} status=${patchRes.status}`);
-        continue;
-      }
-    } catch {
-      console.error(`[api] GET /api/ghl/users org=${orgId} baja_fetch_fail id=${p.id}`);
-      continue;
-    }
-    try {
-      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(p.id), {
-        method: 'PUT',
-        headers: svcHeaders(),
-        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
-      });
-    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
-    p.active = false; // consistencia del objeto local con la DB
-    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} (huérfano manual con GHL conectado)`);
+    const ok = await bajaPerfil(p, orgId, '(huérfano manual con GHL conectado)');
+    if (!ok) continue;
     removed.push(p.name);
   }
 
@@ -1655,27 +1696,8 @@ async function listGhlUsers(req, res, admin, url) {
   // usuario ya no está en la subcuenta (o figura deleted) → baja automática.
   for (const p of profs) {
     if (!p.ghl_user_id || p.active === false || ghlIds.has(p.ghl_user_id)) continue;
-    try {
-      const patchRes = await fetch(
-        SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
-        { method: 'PATCH', headers: svcHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify({ active: false }) }
-      );
-      if (patchRes.status < 200 || patchRes.status >= 300) {
-        console.error(`[api] GET /api/ghl/users org=${orgId} baja_fail id=${p.id} status=${patchRes.status}`);
-        continue;
-      }
-    } catch {
-      console.error(`[api] GET /api/ghl/users org=${orgId} baja_fetch_fail id=${p.id}`);
-      continue;
-    }
-    try {
-      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(p.id), {
-        method: 'PUT',
-        headers: svcHeaders(),
-        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
-      });
-    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
-    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} (ya no está en GHL)`);
+    const ok = await bajaPerfil(p, orgId, '(ya no está en GHL)');
+    if (!ok) continue;
     removed.push(p.name);
   }
 
