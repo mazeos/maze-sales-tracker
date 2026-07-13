@@ -1333,7 +1333,18 @@ let GHL_USERS=null, GHL_USERS_LOADING=false, GHL_REMOVED=[], GHL_AUTO_LINKED=[];
 const GHL_STATUS_CHIP={nuevo:['Nuevo','st-nuevo'],vinculable:['Vinculable','st-vinculable'],importado:['Importado','st-importado'],inactivo:['Inactivo','st-inactivo']};
 const GHL_STATUS_ACTION={nuevo:'Importar',vinculable:'Vincular',inactivo:'Reactivar'};
 function ghlTeamCard(){
-  if(!IS_ADMIN || !GHL_STATUS || !GHL_STATUS.connected) return '';
+  if(!IS_ADMIN) return '';
+  if(GHL_STATUS===null){
+    // Carga lazy, mismo patrón que ghlCard() (línea ~1239). loadGhlStatus() ya se
+    // protege contra llamadas concurrentes vía GHL_LOADING: si ghlCard() ya la disparó
+    // en este mismo render (modo normal, fuera de visita) esta 2da llamada no repite el
+    // fetch. En modo visita ghlCard() no se renderiza, así que acá es la única que dispara
+    // la carga — y trae los datos de la org visitada (GHL_STATUS ya fue invalidado al
+    // entrar/salir de visita en enterOrgAsSuper/exitSuperView).
+    loadGhlStatus();
+    return `<div class="section"><div class="eyebrow">Equipo desde HighLevel</div><p style="color:var(--muted);font-size:13px;margin:0">Verificando conexión…</p></div>`;
+  }
+  if(!GHL_STATUS.connected) return '';
   // (a) Código de acceso del equipo = Location ID (contraseña inicial).
   const codeBox=`<div class="ghl-code">
     <div>
@@ -2074,6 +2085,9 @@ window.enterOrgAsSuper=async(i)=>{
   const o=ORGS&&ORGS[i]; if(!o||o.id===ME.org_id) return;
   if(!SUPER_HOME) SUPER_HOME={...ME}; // guardar el equipo propio la 1ra vez
   ME={id:ME.id, role:'admin', name:ME.name, org_id:o.id}; IS_ADMIN=true;
+  // Invalidar todo el estado de HighLevel cacheado: es de la org anterior, no de la visitada.
+  // Ningún dato de una org puede sobrevivir al cambio a otra.
+  GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
@@ -2083,6 +2097,8 @@ window.enterOrgAsSuper=async(i)=>{
 window.exitSuperView=async()=>{
   if(!SUPER_HOME) return;
   ME={...SUPER_HOME}; SUPER_HOME=null; IS_ADMIN = ME.role==='admin' || IS_SUPER;
+  // Invalidar el estado de HighLevel: no puede arrastrarse desde la org visitada.
+  GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
