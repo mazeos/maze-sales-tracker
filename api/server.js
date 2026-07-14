@@ -610,6 +610,10 @@ function tzDayRange(dateStr, tz) {
   return { start, end: start + 86400000 };
 }
 
+// KPIs que computeMemberKpis (metrics.js) calcula desde salesRows/cuotasRows del
+// propio tracker, no desde la API de GHL. Ver metrics.js bloque "Ventas y cuotas".
+const VENTAS_KPI_KEYS = new Set(['cierres', 'cash_nuevo', 'reservas', 'revenue', 'cash_cuotas']);
+
 async function captureGhl(req, res, member, url) {
   const orgId = effectiveOrg(member, url.searchParams.get('org_id'));
   const date = String(url.searchParams.get('date') || '');
@@ -689,8 +693,11 @@ async function captureGhl(req, res, member, url) {
   } catch {
     return sendJSON(res, 502, { error: 'No se pudieron calcular los KPIs de GHL' });
   }
+  // Claves que el motor calcula desde las ventas del propio tracker (salesRows/
+  // cuotasRows en metrics.js), NO desde GHL — hay que etiquetarlas distinto para
+  // que el badge de "Autocompletar" no mienta diciendo GHL donde no lo es.
   for (const [k, v] of Object.entries(result.values || {})) {
-    metrics[k] = { value: v, source: 'ghl' };
+    metrics[k] = { value: v, source: VENTAS_KPI_KEYS.has(k) ? 'ventas' : 'ghl' };
   }
   contacts = result.contacts || {};
 
