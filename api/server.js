@@ -725,9 +725,19 @@ async function captureGhl(req, res, member, url) {
   // confirmed→showed/noshow, o para setters el tope de paginado del motor —
   // api/metrics.js:108-118 — que puede subcontar en días viejos con volumen) es
   // infinitamente mejor que un 0 inventado. Para HOY no cambia nada: siempre se
-  // persiste el recién calculado, exista o no la fila.
+  // persiste el recién calculado, exista o no la fila, sin depender de esta lectura.
   //
-  // OJO: en un upsert bulk PostgREST deriva las columnas del primer objeto del
+  // Y si esa lectura FALLA (status ≠ 200, red caída): abortamos el upsert de esta
+  // fecha entero, no escribimos nada. NO se degrada a "usá el recién calculado",
+  // porque eso pisaría los auto_value buenos con el recálculo poco confiable —
+  // justo lo que este bloque existe para evitar, y encima a ciegas. Perder el
+  // desglose de contactos de una corrida es recuperable (el usuario vuelve a
+  // apretar el botón); un auto_value corrompido en el historial de calibración, no.
+  // OJO: NO usar svcGet acá — devuelve [] tanto ante un fallo como ante "no hay
+  // filas todavía" (el caso legítimo y común de un día que el nocturno nunca
+  // calculó), y son dos situaciones opuestas. Fetch directo y mirar el status.
+  //
+  // OJO 2: en un upsert bulk PostgREST deriva las columnas del primer objeto del
   // array — por eso TODAS las filas llevan auto_value (shape uniforme), a diferencia
   // de manual_value que nunca va.
   const todayInTz = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -735,11 +745,20 @@ async function captureGhl(req, res, member, url) {
   const kpisToWrite = Object.entries(metrics).filter(([, m]) => m.source === 'ghl' || m.source === 'ventas');
 
   let oldAutoByKpi = new Map();
+  let canWriteShadow = true;
   if (!isToday && kpisToWrite.length) {
-    const existingRows = await svcGet('st_shadow_metrics?org_id=eq.' + encodeURIComponent(orgId)
-      + '&member_id=eq.' + encodeURIComponent(targetId) + '&metric_date=eq.' + encodeURIComponent(date)
-      + '&select=kpi,auto_value');
-    oldAutoByKpi = new Map(existingRows.map(row => [row.kpi, row.auto_value]));
+    try {
+      const pr_ = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?org_id=eq.' + encodeURIComponent(orgId)
+        + '&member_id=eq.' + encodeURIComponent(targetId) + '&metric_date=eq.' + encodeURIComponent(date)
+        + '&select=kpi,auto_value', { headers: svcHeaders() });
+      if (pr_.status !== 200) throw new Error('lectura de auto_value previo falló: ' + pr_.status);
+      const existingRows = await pr_.json();               // 200 + [] = no hay filas (caso legítimo)
+      if (!Array.isArray(existingRows)) throw new Error('lectura de auto_value previo: body inesperado');
+      oldAutoByKpi = new Map(existingRows.map(row => [row.kpi, row.auto_value]));
+    } catch (e) {
+      canWriteShadow = false;
+      console.error(`[api] GET /api/capture/ghl org=${orgId} shadow_read_fail date=${date} member=${targetId}: ${e.message} — se omite el upsert de esta fecha para no pisar auto_value`);
+    }
   }
 
   const shadowRows = kpisToWrite.map(([kpi, m]) => ({
@@ -751,7 +770,7 @@ async function captureGhl(req, res, member, url) {
     // calculado, porque no hay nada que proteger todavía.
     auto_value: isToday ? (+m.value || 0) : (oldAutoByKpi.has(kpi) ? oldAutoByKpi.get(kpi) : (+m.value || 0)),
   }));
-  if (shadowRows.length) {
+  if (shadowRows.length && canWriteShadow) {
     try {
       const r = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
         method: 'POST',
