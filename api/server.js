@@ -591,12 +591,14 @@ async function ghlLeads(req, res, member, url) {
 }
 
 // ---------- GET /api/capture/ghl ----------
-// Autocompletar Cargar día (Fase 3 carcasa). SOLO closers en v1:
-// - llamadas/asistencias/no_shows: citas del calendario de la org del día pedido,
-//   SOLO las asignadas al ghl_user_id del closer (sin assignedUserId = no certera, se ignora).
-// - cierres/cash_nuevo: st_sales del closer ese día (fuente: el propio tracker).
-// El día se corta en la TZ de la org. Nada se escribe acá: la UI aplica los valores
-// y el usuario guarda por el flujo normal (la RLS de st_entries manda).
+// Autocompletar Cargar día. Un solo motor (computeMemberKpis, el mismo del modo
+// sombra) para todos los roles con ghl_user_id vinculado: closer (llamadas/
+// asistencias/no_shows por calendario + cierres/cash/reservas/revenue/cash_cuotas
+// desde st_sales/st_cuotas del tracker) y setter/triage (conversaciones). El día
+// se corta en la TZ de la org. Además de devolver los valores, esta ruta persiste
+// el cálculo (con el desglose de contactos) en st_shadow_metrics — la UI igual
+// aplica los valores y el usuario guarda por el flujo normal (la RLS de
+// st_entries manda).
 function tzDayRange(dateStr, tz) {
   const utcMidnight = new Date(dateStr + 'T00:00:00Z').getTime();
   const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false,
@@ -650,55 +652,24 @@ async function captureGhl(req, res, member, url) {
     if (orow && orow.tz) tz = orow.tz;
   } catch { /* fallback al default */ }
 
-  const metrics = {};
-
-  // Citas del día asignadas al closer (solo si tiene ghl_user_id vinculado).
-  if (prof.role === 'closer' && prof.ghl_user_id) {
-    let events = [];
-    try {
-      const { start, end } = tzDayRange(date, tz);
-      const evRes = await ghlWithRetry(creds, (t) => fetch(
-        `${GHL_BASE}/calendars/events?locationId=${encodeURIComponent(creds.locationId)}&calendarId=${encodeURIComponent(calendarId)}&startTime=${start}&endTime=${end}`,
-        { headers: ghlHeaders(t, '2021-04-15') }
-      ));
-      const ev = await evRes.json().catch(() => ({}));
-      events = ev.events || [];
-    } catch {
-      return sendJSON(res, 502, { error: 'No se pudieron leer las citas de GHL' });
-    }
-    let llamadas = 0, asistencias = 0, noShows = 0;
-    for (const e of events) {
-      if (e.deleted) continue;
-      if (e.assignedUserId !== prof.ghl_user_id) continue; // sin asignación certera no cuenta
-      const st = String(e.appointmentStatus || '').toLowerCase();
-      if (['cancelled', 'invalid'].includes(st)) continue;
-      llamadas++;
-      if (st === 'showed') asistencias++;
-      if (st === 'noshow') noShows++;
-    }
-    metrics.llamadas = { value: llamadas, source: 'ghl' };
-    metrics.asistencias = { value: asistencias, source: 'ghl' };
-    metrics.no_shows = { value: noShows, source: 'ghl' };
-  }
-
-  // Cierres y cash desde las ventas del tracker (fuente de verdad interna). Solo closer.
+  // Ventas y cuotas del tracker (fuente de verdad interna) — se las damos al motor,
+  // que calcula cierres/cash/reservas/revenue/cash_cuotas con la misma regla del modo sombra.
+  let salesRows = [], cuotasRows = [];
   if (prof.role === 'closer') {
-    try {
-      const sr = await fetch(
-        SUPABASE_URL + '/rest/v1/st_sales?org_id=eq.' + encodeURIComponent(orgId)
-          + '&closer_id=eq.' + encodeURIComponent(targetId) + '&sale_date=eq.' + encodeURIComponent(date) + '&select=cash',
-        { headers: svcHeaders() }
-      );
-      const sales = await sr.json().catch(() => null);
-      if (Array.isArray(sales)) {
-        metrics.cierres = { value: sales.length, source: 'ventas' };
-        metrics.cash_nuevo = { value: sales.reduce((a, s) => a + (+s.cash || 0), 0), source: 'ventas' };
-      }
-    } catch { /* sin ventas legibles: se omiten esas métricas */ }
+    salesRows = await svcGet('st_sales?org_id=eq.' + encodeURIComponent(orgId)
+      + '&select=id,closer_id,sale_date,cash,reserva,facturado');
+    const ids = salesRows.map((s) => s.id);
+    if (ids.length) {
+      cuotasRows = await svcGet('st_cuotas?sale_id=in.(' + ids.map(encodeURIComponent).join(',') + ')'
+        + '&select=sale_id,status,paid_date,paid_amount');
+    }
   }
 
-  // Setter / triage: KPIs de conversaciones del día vía el motor completo (mismo del modo sombra).
-  if (prof.role !== 'closer' && prof.ghl_user_id) {
+  // Un solo motor para todos los roles: el mismo del modo sombra. Devuelve los KPIs
+  // del día y el desglose de contactos que compone cada uno.
+  const metrics = {};
+  let contacts = {};
+  if (prof.ghl_user_id) {
     const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
     const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
     const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
@@ -708,7 +679,7 @@ async function captureGhl(req, res, member, url) {
         ghlBase: GHL_BASE, token: creds.token, locationId: creds.locationId,
         calendarId, tz, date,
         member: { id: targetId, role: prof.role, ghl_user_id: prof.ghl_user_id },
-        salesRows: [], cuotasRows: [], bookingDomains, agendaCalendarIds,
+        salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
       });
     } catch {
       return sendJSON(res, 502, { error: 'No se pudieron calcular los KPIs de GHL' });
@@ -716,9 +687,34 @@ async function captureGhl(req, res, member, url) {
     for (const [k, v] of Object.entries(result.values || {})) {
       metrics[k] = { value: v, source: 'ghl' };
     }
+    contacts = result.contacts || {};
   }
 
-  return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics });
+  // Persistir lo calculado en st_shadow_metrics: así el desglose de contactos queda
+  // guardado y la Vista Tabla no tiene que volver a pegarle a GHL para mostrarlo.
+  // NO se toca manual_value: esa columna la escribe el worker nocturno del modo sombra.
+  const shadowRows = Object.entries(metrics)
+    .filter(([, m]) => m.source === 'ghl' || m.source === 'ventas')
+    .map(([kpi, m]) => ({
+      org_id: orgId, member_id: targetId, metric_date: date, kpi,
+      auto_value: +m.value || 0,
+      contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
+      computed_at: new Date().toISOString(),
+    }));
+  if (shadowRows.length) {
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
+        method: 'POST',
+        headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(shadowRows),
+      });
+    } catch {
+      console.error(`[api] GET /api/capture/ghl org=${orgId} shadow_upsert_fail date=${date} member=${targetId}`);
+      /* best-effort: los números igual se devuelven; solo se pierde el desglose guardado */
+    }
+  }
+
+  return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics, contacts });
 }
 
 // ---------- Auto-carga Fase A: modo sombra ----------
