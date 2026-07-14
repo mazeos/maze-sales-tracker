@@ -745,31 +745,45 @@ async function captureGhl(req, res, member, url) {
   const kpisToWrite = Object.entries(metrics).filter(([, m]) => m.source === 'ghl' || m.source === 'ventas');
 
   let oldAutoByKpi = new Map();
+  let oldContactsByKpi = new Map();
   let canWriteShadow = true;
   if (!isToday && kpisToWrite.length) {
     try {
       const pr_ = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?org_id=eq.' + encodeURIComponent(orgId)
         + '&member_id=eq.' + encodeURIComponent(targetId) + '&metric_date=eq.' + encodeURIComponent(date)
-        + '&select=kpi,auto_value', { headers: svcHeaders() });
+        + '&select=kpi,auto_value,contacts', { headers: svcHeaders() });
       if (pr_.status !== 200) throw new Error('lectura de auto_value previo falló: ' + pr_.status);
       const existingRows = await pr_.json();               // 200 + [] = no hay filas (caso legítimo)
       if (!Array.isArray(existingRows)) throw new Error('lectura de auto_value previo: body inesperado');
       oldAutoByKpi = new Map(existingRows.map(row => [row.kpi, row.auto_value]));
+      oldContactsByKpi = new Map(existingRows.map(row => [row.kpi, row.contacts]));
     } catch (e) {
       canWriteShadow = false;
       console.error(`[api] GET /api/capture/ghl org=${orgId} shadow_read_fail date=${date} member=${targetId}: ${e.message} — se omite el upsert de esta fecha para no pisar auto_value`);
     }
   }
 
-  const shadowRows = kpisToWrite.map(([kpi, m]) => ({
-    org_id: orgId, member_id: targetId, metric_date: date, kpi,
-    contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
-    computed_at: new Date().toISOString(),
-    // Hoy: siempre el recién calculado. Fecha pasada con fila existente: se preserva
-    // el valor viejo (ver comentario arriba). Fecha pasada sin fila: el recién
-    // calculado, porque no hay nada que proteger todavía.
-    auto_value: isToday ? (+m.value || 0) : (oldAutoByKpi.has(kpi) ? oldAutoByKpi.get(kpi) : (+m.value || 0)),
-  }));
+  const shadowRows = kpisToWrite.map(([kpi, m]) => {
+    const newContacts = Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null;
+    return {
+      org_id: orgId, member_id: targetId, metric_date: date, kpi,
+      // Mismo criterio que auto_value (ver comentario arriba), aplicado a contacts:
+      // el recálculo de una fecha pasada puede subcontar (paginado con tope, citas
+      // que mutaron, contacto borrado de GHL) y traer MENOS contactos de los que
+      // ya había guardados, o directamente ninguno. Pisar con ese vacío borraría un
+      // desglose bueno del historial — el mismo error que ya se corrigió para
+      // auto_value. Hoy: siempre el recién calculado (si hoy no hay contactos, es
+      // correcto que quede vacío). Fecha pasada: si el recálculo trajo contactos se
+      // actualiza; si vino vacío/nulo, se preserva el que ya estaba guardado (o null
+      // si no había fila previa — no hay nada que proteger todavía).
+      contacts: isToday ? newContacts : (newContacts || (oldContactsByKpi.has(kpi) ? oldContactsByKpi.get(kpi) : null)),
+      computed_at: new Date().toISOString(),
+      // Hoy: siempre el recién calculado. Fecha pasada con fila existente: se preserva
+      // el valor viejo (ver comentario arriba). Fecha pasada sin fila: el recién
+      // calculado, porque no hay nada que proteger todavía.
+      auto_value: isToday ? (+m.value || 0) : (oldAutoByKpi.has(kpi) ? oldAutoByKpi.get(kpi) : (+m.value || 0)),
+    };
+  });
   if (shadowRows.length && canWriteShadow) {
     try {
       const r = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
