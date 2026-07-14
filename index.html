@@ -403,6 +403,7 @@ const METRICS = {
     {k:'inbound_ig', label:'Inbound IG', def:'Personas que ME escribieron por Instagram.'},
     {k:'inbound_wpp_tk', label:'Inbound Wpp·TikTok', def:'Mensajes recibidos por el WhatsApp de TikTok.'},
     {k:'inbound_wpp_ig', label:'Inbound Wpp·IG', def:'Mensajes recibidos por el WhatsApp de Instagram.'},
+    {k:'inbound_wpp_sin_canal', label:'Inbound Wpp (sin canal)', def:'Te escribieron por WhatsApp, pero no pudimos determinar si venían de Instagram o de TikTok.\n\nCÓMO SE MIDE: el contacto es nuevo (dado de alta hoy en el CRM) y el primer mensaje de la conversación es entrante por WhatsApp, pero el contacto no tiene el campo utm_source ni un tag "origen:" que diga de dónde vino.\n\nSi este número es alto, tus inbounds de WhatsApp están mal atribuidos: entrá a los contactos (clic en el punto de la celda) y revisá por qué no traen origen.'},
     {k:'bienvenidas', label:'Bienvenidas', def:'Bienvenidas automáticas (ManyChat).'},
     {k:'cta', label:'CTA', def:'Respuestas a call-to-action de feed o historias.'},
     {k:'respuestas', label:'Respuestas', def:'Respuestas obtenidas a nuestros mensajes.'},
