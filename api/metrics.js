@@ -16,6 +16,12 @@ export function tzDayRange(dateStr, tz) {
 
 // throttle simple: ~10 req/s + 1 reintento en 429
 let lastReq = 0;
+// Lanza si GHL responde 4xx/5xx (después del reintento de 429). Antes,
+// `res.json().catch(() => ({}))` devolvía silenciosamente `{}` ante CUALQUIER
+// status: un 401/403/500 de GHL quedaba indistinguible de "sin resultados"
+// (ev.events undefined -> [], llamadas/asistencias/no_shows -> 0). El caller
+// (captureGhl en server.js) tiene un try/catch que ya sabe convertir esto en
+// un 502 -- con eso alcanza para volver al comportamiento pre-unificación.
 async function ghlFetch(url, headers) {
   const wait = Math.max(0, lastReq + 100 - Date.now());
   if (wait) await new Promise((r) => setTimeout(r, wait));
@@ -26,6 +32,7 @@ async function ghlFetch(url, headers) {
     lastReq = Date.now();
     res = await fetch(url, { headers });
   }
+  if (!res.ok) throw new Error(`GHL respondió ${res.status} en ${url}`);
   return res.json().catch(() => ({}));
 }
 
@@ -140,9 +147,14 @@ export async function computeMemberKpis(ctx) {
       const isIg = IG_TYPES.has(type), isWa = WA_TYPES.has(type), isTk = TK_TYPES.has(type);
       // Traer el contacto para leer su fecha de alta (esNuevo) y, en WhatsApp, el
       // canal por utm_source. Una vez por conversación; cachea el nombre para el desglose.
+      // Un contacto puntual puede haber sido borrado en GHL (404) sin que eso sea
+      // una falla real del día — se tolera local (mismo criterio que ghlLeads en
+      // server.js: "contacto ilegible: lo salteamos") y NO se deja propagar el
+      // throw de ghlFetch, que sí debe cortar el cálculo entero ante una falla
+      // estructural (calendario/conversaciones caídos).
       let esNuevo = false, waCanal = null;
       if (c.contactId) {
-        const contact = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(c.contactId)}`, H);
+        const contact = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(c.contactId)}`, H).catch(() => ({}));
         const cc = contact.contact || {};
         contactNames.set(c.contactId, nombreDe(cc));
         esNuevo = cc.dateAdded ? inDay(cc.dateAdded) : false;
@@ -217,10 +229,12 @@ export async function computeMemberKpis(ctx) {
   }
 
   // Resolver nombres de los contactos únicos que aún no tenemos cacheados.
+  // Igual que arriba: un contacto borrado (404) no debe tirar abajo todo el
+  // desglose, solo queda con el fallback "Sin nombre" de nombreDe({}).
   const faltan = new Set();
   for (const m of Object.values(contactsByKpi)) for (const id of m.keys()) if (!contactNames.has(id)) faltan.add(id);
   for (const id of faltan) {
-    const cr = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(id)}`, H);
+    const cr = await ghlFetch(`${ghlBase}/contacts/${encodeURIComponent(id)}`, H).catch(() => ({}));
     contactNames.set(id, nombreDe(cr.contact || {}));
   }
   const contacts = {};
