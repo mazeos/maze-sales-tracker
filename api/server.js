@@ -1252,15 +1252,11 @@ async function deleteMember(req, res, admin, id) {
     return sendJSON(res, 502, { error: 'No se pudo dar de baja al miembro' });
   }
 
-  // Banear el auth user para que no pueda loguearse.
-  try {
-    await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(id), {
-      method: 'PUT',
-      headers: svcHeaders(),
-      body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
-    });
-  } catch { /* el soft-delete ya impide que aparezca en la UI; el ban es best-effort */ }
-
+  // Sin ban: el soft-delete (active=false) ya bloquea el acceso vía RLS
+  // (st_my_profile() filtra `active is not false`, y TODAS las políticas
+  // cuelgan de esa función). El GoTrue es compartido entre orgs y entre apps
+  // (tracker, CallIQ, etc.) — banear sacaría a la persona del login de TODO
+  // por una baja de una sola org.
   console.log(`[api] DELETE /api/members admin=${admin.uid} deactivated id=${id} -> 200`);
   return sendJSON(res, 200, { ok: true });
 }
@@ -1515,18 +1511,25 @@ function ghlUserName(u) {
 }
 
 // Da de baja UN perfil de la org: soft-delete SIEMPRE (active=false, scoped a
-// la org — no toca otras orgs) y ban en GoTrue SOLO si el auth user detrás no
-// tiene NINGÚN OTRO perfil activo en NINGUNA otra org. El GoTrue es COMPARTIDO
-// entre orgs y entre apps (tracker, CallIQ, etc.): banear sin este chequeo
-// saca a la persona del login de TODO por una reconciliación de una sola org.
-// `authUid` = p.user_id (columna del auth uid desde la migración 013, donde
-// `st_profiles.id` pasó a ser gen_random_uuid()); fallback a p.id para
-// perfiles viejos donde user_id vino null (ahí id==user_id por construcción).
-// Fail-safe: si el chequeo cross-org falla por red, NO se banea (mejor un ban
-// de menos que sacarle a alguien el acceso a otra org/app por error).
+// la org — no toca otras orgs ni el auth user). Sin ban: el soft-delete ya
+// bloquea el acceso vía RLS (st_my_profile() filtra `active is not false`,
+// y TODAS las políticas cuelgan de esa función). El GoTrue es COMPARTIDO
+// entre orgs y entre apps (tracker, CallIQ, etc.) — banear sacaría a la
+// persona del login de TODO por una reconciliación de una sola org.
+// GUARDA INAMOVIBLE: nunca da de baja un perfil role='admin'. Vive acá (no en
+// cada caller) para proteger las DOS fases de la reconciliación de una — la
+// fase 1 (auto-link por email) puede vincular el ghl_user_id del propio dueño
+// de la org si su email coincide con un usuario de su subcuenta GHL, y sin
+// esta guarda la fase 3 (GHL manda) lo daría de baja apenas ese usuario
+// desapareciera de la subcuenta (borrado, deleted:true, o una página parcial
+// de fetchGhlUsers) → auto-lockout del dueño.
 // Devuelve true si el soft-delete se aplicó (el caller lo cuenta como
-// "removido" de esta org); el ban es best-effort y no cambia el resultado.
+// "removido" de esta org).
 async function bajaPerfil(p, orgId, motivo) {
+  if (p.role === 'admin') {
+    console.log(`[api] GET /api/ghl/users org=${orgId} baja_bloqueada_admin id=${p.id} name=${p.name} ${motivo}`);
+    return false;
+  }
   try {
     const patchRes = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(p.id),
@@ -1541,34 +1544,7 @@ async function bajaPerfil(p, orgId, motivo) {
     return false;
   }
   p.active = false; // consistencia del objeto local con la DB
-
-  const authUid = p.user_id || p.id;
-  let otherActive = true; // fail-safe: ante duda (error de red) NO banear
-  try {
-    const r = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?user_id=eq.' + encodeURIComponent(authUid)
-        + '&org_id=neq.' + encodeURIComponent(orgId)
-        + '&active=eq.true&select=id&limit=1',
-      { headers: svcHeaders() }
-    );
-    if (r.status === 200) {
-      const rows = await r.json().catch(() => null);
-      otherActive = Array.isArray(rows) && rows.length > 0;
-    }
-  } catch { /* otherActive queda true: fail-safe, no banear */ }
-
-  if (otherActive) {
-    console.log(`[api] GET /api/ghl/users org=${orgId} baja_sin_ban id=${p.id} name=${p.name} ${motivo} (tiene perfiles activos en otra org, GoTrue es compartido)`);
-  } else {
-    try {
-      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(authUid), {
-        method: 'PUT',
-        headers: svcHeaders(),
-        body: JSON.stringify({ ban_duration: '87600h' }), // ~10 años
-      });
-    } catch { /* best-effort: el soft-delete ya lo saca de la UI */ }
-    console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} ${motivo}`);
-  }
+  console.log(`[api] GET /api/ghl/users org=${orgId} baja_auto id=${p.id} name=${p.name} ${motivo}`);
   return true;
 }
 
@@ -1579,10 +1555,13 @@ async function bajaPerfil(p, orgId, motivo) {
 //   1. Auto-link: perfil activo sin ghl_user_id cuyo email coincide exacto con
 //      un usuario GHL → se vincula (solo ghl_user_id) y sale "importado".
 //   2. Huérfanos manuales: perfil activo no-admin que quedó sin ghl_user_id
-//      tras el auto-link → baja automática (active=false + ban).
+//      tras el auto-link → baja automática (active=false).
 //   3. Desvinculados: perfil importado cuyo usuario ya no está en la subcuenta
-//      (o figura deleted) → baja automática (active=false + ban).
-// Los perfiles con role='admin' NUNCA se dan de baja automáticamente.
+//      (o figura deleted) → baja automática (active=false).
+// Los perfiles con role='admin' NUNCA se dan de baja automáticamente — la
+// guarda vive DENTRO de bajaPerfil() y cubre las fases 2 y 3 de una sola vez
+// (fase 1 puede auto-vincular el ghl_user_id del propio dueño de la org, así
+// que la fase 3 tiene que estar protegida igual que la fase 2).
 async function listGhlUsers(req, res, admin, url) {
   const orgId = effectiveOrg(admin, url.searchParams.get('org_id'));
   const integration = await getIntegration(orgId);
@@ -1679,11 +1658,12 @@ async function listGhlUsers(req, res, admin, url) {
 
   // Reconciliación total — paso 2: huérfanos manuales. Con GHL conectado, todo
   // perfil activo no-admin que quedó sin ghl_user_id tras el auto-link no existe
-  // en la subcuenta → baja automática (mismo patrón PATCH+ban del paso 3).
-  // EXCEPCIÓN INAMOVIBLE: los perfiles con role='admin' NUNCA se dan de baja acá
-  // — el admin de la org puede no ser usuario de la subcuenta GHL; sin esta
-  // excepción el dueño se bloquearía a sí mismo al conectar. Corre DESPUÉS del
-  // map de `users`: los huérfanos manuales no aparecen en la lista GHL.
+  // en la subcuenta → baja automática (mismo patrón PATCH del paso 3). El
+  // filtro `role !== 'admin'` de acá es redundante con la guarda de
+  // bajaPerfil() (defensa en profundidad) — el admin de la org puede no ser
+  // usuario de la subcuenta GHL; sin ella el dueño se bloquearía a sí mismo al
+  // conectar. Corre DESPUÉS del map de `users`: los huérfanos manuales no
+  // aparecen en la lista GHL.
   for (const p of profs) {
     const orphan = p.active !== false && !p.ghl_user_id && p.role !== 'admin';
     if (!orphan) continue;
@@ -1694,6 +1674,11 @@ async function listGhlUsers(req, res, admin, url) {
 
   // Reconciliación — paso 3, GHL manda (D-04): perfiles importados activos cuyo
   // usuario ya no está en la subcuenta (o figura deleted) → baja automática.
+  // Sin filtro explícito de role acá: la guarda anti-admin vive DENTRO de
+  // bajaPerfil() y aplica igual — es alcanzable que un admin llegue con
+  // ghl_user_id seteado (fase 1 lo auto-vincula si su email coincide con un
+  // usuario de su propia subcuenta), y fetchGhlUsers no pagina, así que una
+  // respuesta parcial de GHL podía antes desactivar al dueño de la org.
   for (const p of profs) {
     if (!p.ghl_user_id || p.active === false || ghlIds.has(p.ghl_user_id)) continue;
     const ok = await bajaPerfil(p, orgId, '(ya no está en GHL)');
@@ -1745,7 +1730,7 @@ async function importGhlUser(req, res, admin) {
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
-        + '&select=id,name,role,active,ghl_user_id',
+        + '&select=id,name,role,active,ghl_user_id,user_id',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los perfiles del equipo' });
@@ -1761,7 +1746,13 @@ async function importGhlUser(req, res, admin) {
     return sendJSON(res, 409, { error: 'Ya está importado' });
   }
   if (existing) {
-    // Reactivar: active=true + unban del auth user.
+    // Reactivar: active=true. Sin ban propio en este flujo, pero un perfil
+    // reactivado puede venir de un ban aplicado por una versión vieja del
+    // código (previa a este fix) — el unban acá es la red de rescate para esa
+    // gente, así que se mantiene. authUid: el uid de auth vive en `user_id`
+    // desde la migración 013 (`id` es la membresía, gen_random_uuid en los
+    // perfiles nacidos del camino "membresía nueva"); fallback a `id` para
+    // perfiles viejos donde user_id vino null.
     try {
       const patchRes = await fetch(
         SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(existing.id),
@@ -1774,12 +1765,12 @@ async function importGhlUser(req, res, admin) {
       return sendJSON(res, 502, { error: 'No se pudo reactivar al miembro' });
     }
     try {
-      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(existing.id), {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(existing.user_id || existing.id), {
         method: 'PUT',
         headers: svcHeaders(),
         body: JSON.stringify({ ban_duration: 'none' }),
       });
-    } catch { /* best-effort unban */ }
+    } catch { /* best-effort unban de rescate */ }
     console.log(`[api] POST /api/ghl/users/import admin=${admin.uid} reactivated id=${existing.id} ghl=${ghlUserId} -> 200`);
     return sendJSON(res, 200, { ok: true, reactivated: true });
   }
@@ -1790,7 +1781,7 @@ async function importGhlUser(req, res, admin) {
   const emailLower = email.toLowerCase();
   for (const p of profs) {
     if (p.ghl_user_id) continue;
-    const pEmail = await getAuthEmail(p.id, emailCache);
+    const pEmail = await getAuthEmail(p.user_id || p.id, emailCache);
     if (pEmail && pEmail === emailLower) {
       try {
         const patchRes = await fetch(
@@ -1883,6 +1874,8 @@ async function importGhlUser(req, res, admin) {
         return sendJSON(res, 500, { error: 'No se pudo vincular al miembro' });
       }
       if (dupProf.active === false) {
+        // Unban de rescate (mismo criterio que el camino "a"): `uid` ya es el
+        // auth uid real (viene de findAuthUserByEmail), no un id de membresía.
         try {
           await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
             method: 'PUT',
@@ -2001,7 +1994,7 @@ async function listOrgs(req, res, sa) {
     orgs = await orgsRes.json().catch(() => null);
 
     const profsRes = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?select=id,org_id,role,active',
+      SUPABASE_URL + '/rest/v1/st_profiles?select=id,org_id,role,active,user_id',
       { headers: svcHeaders() }
     );
     if (profsRes.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer las organizaciones' });
@@ -2038,7 +2031,7 @@ async function listOrgs(req, res, sa) {
     const admins = [];
     for (const p of orgProfs) {
       if (p.role !== 'admin') continue;
-      const email = await getAuthEmail(p.id, emailCache);
+      const email = await getAuthEmail(p.user_id || p.id, emailCache);
       if (email) admins.push(email);
     }
     const integ = intByOrg.get(o.id) || null;
@@ -2345,7 +2338,7 @@ async function listOrgMembers(req, res, sa, orgId) {
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId)
-        + '&select=id,name,role,active,ghl_user_id&order=name.asc',
+        + '&select=id,name,role,active,ghl_user_id,user_id&order=name.asc',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los miembros' });
@@ -2361,7 +2354,7 @@ async function listOrgMembers(req, res, sa, orgId) {
     members.push({
       id: p.id,
       name: p.name,
-      email: await getAuthEmail(p.id, emailCache),
+      email: await getAuthEmail(p.user_id || p.id, emailCache),
       role: p.role,
       active: p.active !== false,
       ghl: !!p.ghl_user_id,
@@ -2607,7 +2600,7 @@ async function memberLoginLink(req, res, sa, orgId, uid) {
   try {
     const r = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(uid)
-        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,active',
+        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,active,user_id',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudo leer el perfil del miembro' });
@@ -2623,7 +2616,10 @@ async function memberLoginLink(req, res, sa, orgId, uid) {
     return sendJSON(res, 400, { error: 'Ese miembro está inactivo' });
   }
 
-  const email = await getAuthEmail(uid, new Map());
+  // `uid` (parámetro de ruta) es el id de la MEMBRESÍA, no necesariamente el
+  // auth uid (desde la migración 013 pueden diferir) — resolver el email
+  // contra prof.user_id, con fallback a uid para perfiles viejos.
+  const email = await getAuthEmail(prof.user_id || uid, new Map());
   if (!email) {
     return sendJSON(res, 404, { error: 'No se encontró el email de ese miembro' });
   }
