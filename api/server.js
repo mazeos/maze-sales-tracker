@@ -702,38 +702,55 @@ async function captureGhl(req, res, member, url) {
 
   // Persistir lo calculado en st_shadow_metrics: así el desglose de contactos queda
   // guardado y la Vista Tabla no tiene que volver a pegarle a GHL para mostrarlo.
-  // NO se toca manual_value: esa columna la escribe el worker nocturno del modo sombra.
+  // NO se toca manual_value: esa columna la escribe el worker nocturno del modo sombra,
+  // es nullable, y ahí sí alcanza con omitirla del body — la columna ausente no la
+  // toca el ON CONFLICT DO UPDATE de PostgREST, y en un INSERT queda en NULL, que es
+  // lo correcto (no hubo medición manual ese día).
   //
-  // auto_value SOLO se persiste si `date` es HOY en la TZ de la org. El nocturno
-  // (runShadowForOrg/shadowTick, más abajo) calcula auto_value UNA VEZ, la noche
-  // que la fecha fue "hoy" — ese historial es la base del panel de calibración y
-  // es sagrado. El backfill de la Vista Tabla llama esta ruta para los 31 días del
-  // mes, pero recalcular una fecha pasada contra el estado de HOY de GHL da un
-  // número distinto (citas que mutaron confirmed→showed/noshow, o para setters,
-  // el motor pagina conversaciones hacia atrás desde ahora con tope 20×100 —
-  // api/metrics.js:108-118 — y para un día viejo con volumen se queda sin
-  // páginas antes de llegar ahí → subcuenta). Escribir ese recálculo pisaría el
-  // valor real de calibración con uno peor. Para fechas pasadas igual guardamos
-  // el desglose (contacts/computed_at) — mismo mecanismo que ya usa manual_value:
-  // la columna ausente del body no la toca el ON CONFLICT DO UPDATE de PostgREST.
+  // auto_value NO puede resolverse igual: es `numeric NOT NULL DEFAULT 0`
+  // (supabase/migrations/012_shadow.sql). "Omitir la columna" solo protege el UPDATE
+  // (fila ya existe → ON CONFLICT DO UPDATE no la toca); en un INSERT (fila nueva)
+  // PostgREST la completa con el DEFAULT, o sea auto_value=0. El backfill de la Vista
+  // Tabla llama esta ruta para los 31 días del mes, y la mayoría de los días pasados
+  // el nocturno nunca corrió (org recién sumada al modo sombra, etc.) → la fila NO
+  // existe → omitir la columna insertaría auto_value=0, afirmando "el valor automático
+  // de ese día fue 0" cuando podía ser 17. Eso ENSUCIA el panel de calibración en vez
+  // de protegerlo. NO "simplificar" esto a un simple `if (isToday)` sin releer este
+  // comentario — ese fue justamente el bug.
+  //
+  // Fix: para fechas pasadas, leemos primero el auto_value existente de cada kpi (si
+  // la fila ya existe) y lo reusamos tal cual en el payload — así el UPDATE preserva
+  // el historial real de calibración. Si la fila NO existe, mandamos el valor recién
+  // calculado: no hay nada que pisar, y un cálculo imperfecto (citas que mutaron
+  // confirmed→showed/noshow, o para setters el tope de paginado del motor —
+  // api/metrics.js:108-118 — que puede subcontar en días viejos con volumen) es
+  // infinitamente mejor que un 0 inventado. Para HOY no cambia nada: siempre se
+  // persiste el recién calculado, exista o no la fila.
   //
   // OJO: en un upsert bulk PostgREST deriva las columnas del primer objeto del
-  // array — por eso el shape (con o sin auto_value) tiene que ser el MISMO para
-  // todas las filas. Como `isToday` depende solo de `date` (compartido por todas
-  // las filas de esta llamada), es seguro.
+  // array — por eso TODAS las filas llevan auto_value (shape uniforme), a diferencia
+  // de manual_value que nunca va.
   const todayInTz = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
   const isToday = date === todayInTz;
-  const shadowRows = Object.entries(metrics)
-    .filter(([, m]) => m.source === 'ghl' || m.source === 'ventas')
-    .map(([kpi, m]) => {
-      const row = {
-        org_id: orgId, member_id: targetId, metric_date: date, kpi,
-        contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
-        computed_at: new Date().toISOString(),
-      };
-      if (isToday) row.auto_value = +m.value || 0;
-      return row;
-    });
+  const kpisToWrite = Object.entries(metrics).filter(([, m]) => m.source === 'ghl' || m.source === 'ventas');
+
+  let oldAutoByKpi = new Map();
+  if (!isToday && kpisToWrite.length) {
+    const existingRows = await svcGet('st_shadow_metrics?org_id=eq.' + encodeURIComponent(orgId)
+      + '&member_id=eq.' + encodeURIComponent(targetId) + '&metric_date=eq.' + encodeURIComponent(date)
+      + '&select=kpi,auto_value');
+    oldAutoByKpi = new Map(existingRows.map(row => [row.kpi, row.auto_value]));
+  }
+
+  const shadowRows = kpisToWrite.map(([kpi, m]) => ({
+    org_id: orgId, member_id: targetId, metric_date: date, kpi,
+    contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
+    computed_at: new Date().toISOString(),
+    // Hoy: siempre el recién calculado. Fecha pasada con fila existente: se preserva
+    // el valor viejo (ver comentario arriba). Fecha pasada sin fila: el recién
+    // calculado, porque no hay nada que proteger todavía.
+    auto_value: isToday ? (+m.value || 0) : (oldAutoByKpi.has(kpi) ? oldAutoByKpi.get(kpi) : (+m.value || 0)),
+  }));
   if (shadowRows.length) {
     try {
       const r = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
