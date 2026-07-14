@@ -665,30 +665,34 @@ async function captureGhl(req, res, member, url) {
     }
   }
 
-  // Un solo motor para todos los roles: el mismo del modo sombra. Devuelve los KPIs
-  // del día y el desglose de contactos que compone cada uno.
+  // Un solo motor para todos los roles: el mismo del modo sombra. Se llama SIEMPRE,
+  // sin guarda de ghl_user_id — el motor se autoprotege: computeMemberKpis calcula
+  // primero los KPIs internos (cierres/cash_nuevo/cash_cuotas/reservas/revenue,
+  // que salen de salesRows/cuotasRows y no de GHL) y recién después chequea el
+  // vínculo con GHL; si no hay ghl_user_id o token, corta ahí y devuelve esos
+  // valores igual con contacts vacío. Con la guarda vieja, un closer sin
+  // ghl_user_id vinculado no entraba nunca a este bloque y se quedaba sin sus
+  // ventas del propio tracker en el ⚡ Autocompletar — esa era la regresión.
+  const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
+  const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
+  const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
   const metrics = {};
   let contacts = {};
-  if (prof.ghl_user_id) {
-    const cfgRows = await svcGet('st_kpi_config?org_id=eq.' + encodeURIComponent(orgId) + '&kpi=eq._config&select=config');
-    const bookingDomains = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.booking_domains) || [];
-    const agendaCalendarIds = (cfgRows[0] && cfgRows[0].config && cfgRows[0].config.agenda_calendar_ids) || [];
-    let result;
-    try {
-      result = await computeMemberKpis({
-        ghlBase: GHL_BASE, token: creds.token, locationId: creds.locationId,
-        calendarId, tz, date,
-        member: { id: targetId, role: prof.role, ghl_user_id: prof.ghl_user_id },
-        salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
-      });
-    } catch {
-      return sendJSON(res, 502, { error: 'No se pudieron calcular los KPIs de GHL' });
-    }
-    for (const [k, v] of Object.entries(result.values || {})) {
-      metrics[k] = { value: v, source: 'ghl' };
-    }
-    contacts = result.contacts || {};
+  let result;
+  try {
+    result = await computeMemberKpis({
+      ghlBase: GHL_BASE, token: creds.token, locationId: creds.locationId,
+      calendarId, tz, date,
+      member: { id: targetId, role: prof.role, ghl_user_id: prof.ghl_user_id },
+      salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
+    });
+  } catch {
+    return sendJSON(res, 502, { error: 'No se pudieron calcular los KPIs de GHL' });
   }
+  for (const [k, v] of Object.entries(result.values || {})) {
+    metrics[k] = { value: v, source: 'ghl' };
+  }
+  contacts = result.contacts || {};
 
   // Persistir lo calculado en st_shadow_metrics: así el desglose de contactos queda
   // guardado y la Vista Tabla no tiene que volver a pegarle a GHL para mostrarlo.
