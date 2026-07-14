@@ -447,6 +447,12 @@ const MONTHS=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov',
 // ---------- Data layer ----------
 const KEY = 'maze_sales_tracker_v1';
 let DB = null;
+// Guardia de época: enterOrgAsSuper()/exitSuperView() la incrementan junto con la
+// invalidación de las globales cacheadas por org (ver declaración original y
+// detalle más abajo, cerca de SUPER_HOME). Declarada acá, junto a DB, porque DB
+// es la global cacheada por org más grande y varios loaders la escriben antes de
+// que ORG_EPOCH se usara por primera vez más abajo en el archivo.
+let ORG_EPOCH=0;
 
 const TZS=[['America/Argentina/Buenos_Aires','Buenos Aires (UTC-3)'],['America/Bogota','Bogotá / Lima (UTC-5)'],['America/Mexico_City','Ciudad de México (UTC-6)'],['America/Caracas','Caracas (UTC-4)'],['America/Santiago','Santiago (UTC-4)'],['America/New_York','Miami / Nueva York (UTC-5)'],['Europe/Madrid','Madrid (UTC+1)']];
 function todayStr(){ const tz=(DB&&DB.team&&DB.team.tz)||'America/Argentina/Buenos_Aires'; try{ return new Intl.DateTimeFormat('en-CA',{timeZone:tz}).format(new Date()); }catch(e){ return dstr(new Date()); } }
@@ -469,12 +475,15 @@ async function pushToSupabase(){
   }
 }
 async function loadFromSupabase(){
-  const org=(await sb.from('st_orgs').select('*').eq('id',ME.org_id).single()).data;
-  const profs=(await sb.from('st_profiles').select('*').eq('org_id',ME.org_id)).data||[];
-  const ents=(await sb.from('st_entries').select('*').eq('org_id',ME.org_id)).data||[];
-  const goalRows=(await sb.from('st_goals').select('*').eq('org_id',ME.org_id).in('period',['week','month'])).data||[];
-  const sales=(await sb.from('st_sales').select('*').eq('org_id',ME.org_id)).data||[];
-  const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data||[];
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await
+  const orgId=ME.org_id; // snapshot: los 6 round-trips quedan atados a la MISMA org aunque ME cambie a mitad de camino
+  const org=(await sb.from('st_orgs').select('*').eq('id',orgId).single()).data;
+  const profs=(await sb.from('st_profiles').select('*').eq('org_id',orgId)).data||[];
+  const ents=(await sb.from('st_entries').select('*').eq('org_id',orgId)).data||[];
+  const goalRows=(await sb.from('st_goals').select('*').eq('org_id',orgId).in('period',['week','month'])).data||[];
+  const sales=(await sb.from('st_sales').select('*').eq('org_id',orgId)).data||[];
+  const cuotas=(await sb.from('st_cuotas').select('*').eq('org_id',orgId)).data||[];
+  if(epoch!==ORG_EPOCH) return; // la org cambió mientras volaba alguno de los 6 fetches: son datos de la org vieja, no pisar DB
   const order={admin:0,setter:1,triage:2,closer:3};
   DB={team:{id:org.id,name:org.name,mode:org.team_mode,tz:org.tz,commission_base:org.commission_base||'contador'},
       members:[...profs.filter(p=>p.role!=='admin' && p.active!==false).map(p=>({id:p.id,name:p.name,role:p.role,commission:+p.commission||0})),
@@ -1174,7 +1183,7 @@ async function loadGhlStatus(){
     if(epoch!==ORG_EPOCH) return; // la org cambió mientras volaba el fetch: es de la org vieja, no pisar la nueva
     GHL_STATUS=(res.ok && data) ? data : {connected:false,error:true};
   }catch(e){ if(epoch===ORG_EPOCH) GHL_STATUS={connected:false,error:true}; }
-  finally{ GHL_LOADING=false; if(epoch===ORG_EPOCH && state.view==='team') renderTeam(); }
+  finally{ GHL_LOADING=false; if(state.view==='team') renderTeam(); } // re-render aunque la época haya cambiado: si se descarta, GHL_STATUS sigue null y el próximo render la vuelve a pedir para la org correcta (evita quedar en "Cargando…")
 }
 // Carga lazy de los calendarios elegibles (mismo patrón que loadGhlStatus).
 async function loadGhlCalendars(){
@@ -1190,7 +1199,7 @@ async function loadGhlCalendars(){
     if(epoch!==ORG_EPOCH) return;
     GHL_CALS=(res.ok && data) ? data : {error:true, msg:(data&&data.error)||''};
   }catch(e){ if(epoch===ORG_EPOCH) GHL_CALS={error:true,msg:''}; }
-  finally{ GHL_CALS_LOADING=false; if(epoch===ORG_EPOCH && state.view==='team') renderTeam(); }
+  finally{ GHL_CALS_LOADING=false; if(state.view==='team') renderTeam(); } // mismo criterio que loadGhlStatus: re-renderiza igual para no quedar en "Cargando…"
 }
 // Sub-bloque "Calendario de llamadas" de la card conectada (solo admin).
 function ghlCalendarBlock(){
@@ -1430,11 +1439,12 @@ window.loadGhlUsers=async ()=>{
     data=await res.json().catch(()=>({}));
   }catch(e){
     GHL_USERS_LOADING=false;
-    if(epoch===ORG_EPOCH){ toast('No se pudo conectar con el servidor'); if(state.view==='team') renderTeam(); }
+    if(epoch===ORG_EPOCH) toast('No se pudo conectar con el servidor');
+    if(state.view==='team') renderTeam(); // re-renderiza igual: si se descarta, evita quedar en "Cargando…"
     return;
   }
   GHL_USERS_LOADING=false;
-  if(epoch!==ORG_EPOCH) return; // la respuesta es de la org vieja (ej: GET a HighLevel tardó y ya volviste a tu equipo): no pisar
+  if(epoch!==ORG_EPOCH){ if(state.view==='team') renderTeam(); return; } // la respuesta es de la org vieja (ej: GET a HighLevel tardó y ya volviste a tu equipo): no pisar, pero sí re-renderizar
   if(res.ok){
     GHL_USERS=data.users||[];
     GHL_REMOVED=data.removed||[];
@@ -1573,13 +1583,13 @@ let IS_SUPER=false, PLAT_SETTINGS=null;
 // se cierra el box o se navega. La contraseña JAMÁS se persiste ni se loggea.
 let ORGS=null, ORGS_ALLOWED=null, ORGS_LOADING=false, ORG_CREATED=null, ORG_CREATING=false;
 let SUPER_HOME=null; // {id,role,name,org_id} del equipo propio mientras el super "entra" a otra org; null = estás en tu equipo
-// Guardia de época: enterOrgAsSuper()/exitSuperView() la incrementan junto con la
-// invalidación de las globales cacheadas por org. Cada loader que escribe una de esas
-// globales captura ORG_EPOCH antes de su primer await y, al volver de cada await,
-// descarta la respuesta si ORG_EPOCH ya cambió — así un fetch en vuelo de la org vieja
-// nunca pisa el estado de la org nueva. Para un usuario que nunca visita otra org,
-// ORG_EPOCH no cambia nunca y el comportamiento es exactamente el de siempre.
-let ORG_EPOCH=0;
+// Guardia de época (ORG_EPOCH, declarada arriba junto a DB): enterOrgAsSuper()/
+// exitSuperView() la incrementan junto con la invalidación de las globales
+// cacheadas por org. Cada loader que escribe una de esas globales captura
+// ORG_EPOCH antes de su primer await y, al volver de cada await, descarta la
+// respuesta si ORG_EPOCH ya cambió — así un fetch en vuelo de la org vieja
+// nunca pisa el estado de la org nueva. Para un usuario que nunca visita otra
+// org, ORG_EPOCH no cambia nunca y el comportamiento es exactamente el de siempre.
 // Subcuenta elegida en el buscador del form de alta ({id,name} o null) +
 // resultados de la última búsqueda (para pickear por índice sin inyectar
 // datos de GHL en atributos onclick) + timer del debounce + estado del
@@ -2137,6 +2147,11 @@ window.enterOrgAsSuper=async(i)=>{
   ORG_EPOCH++; // cierra la puerta a cualquier fetch en vuelo de la org anterior (guardia de época)
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
+  // Los *_LOADING también se resetean acá (no solo en el finally de cada loader):
+  // si había un fetch en vuelo de la org anterior, su propio finally lo va a
+  // volver a poner en false igual (guardia de época), pero sin este reset la UI
+  // se queda mostrando "Cargando…" hasta que ESA promesa vieja resuelva.
+  GHL_LOADING=false; GHL_CALS_LOADING=false; GHL_USERS_LOADING=false; SHADOW_LOADING=false;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
@@ -2150,6 +2165,9 @@ window.exitSuperView=async()=>{
   ORG_EPOCH++; // guardia de época: descarta cualquier fetch en vuelo de la org visitada
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
   GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
+  // Mismo criterio que enterOrgAsSuper: resetear acá evita quedar en "Cargando…"
+  // hasta que la promesa vieja (de la org visitada) resuelva por su cuenta.
+  GHL_LOADING=false; GHL_CALS_LOADING=false; GHL_USERS_LOADING=false; SHADOW_LOADING=false;
   await loadFromSupabase();
   state.capMember=DB.members[0]&&DB.members[0].id; state.tblMember=state.capMember;
   renderSuperBanner();
@@ -2281,7 +2299,7 @@ async function loadShadow(){
     sb.from('st_kpi_config').select('*').eq('org_id',ME.org_id),
   ]);
   SHADOW_LOADING=false;
-  if(epoch!==ORG_EPOCH) return; // la org cambió mientras esperábamos: son datos de la org vieja
+  if(epoch!==ORG_EPOCH){ if(state.view==='team') renderTeam(); return; } // la org cambió mientras esperábamos: son datos de la org vieja, no pisar, pero sí re-renderizar
   SHADOW=sm.data||[]; KPI_CFG=kc.data||[];
   if(state.view==='team') renderTeam();
 }
@@ -2590,8 +2608,10 @@ let _cuoRefreshing=false;
 async function refreshCuotas(){
   if(_cuoRefreshing||!ME) return;
   _cuoRefreshing=true;
+  const epoch=ORG_EPOCH; // guardia de época: capturada antes del 1er await
   try{
     const fresh=(await sb.from('st_cuotas').select('*').eq('org_id',ME.org_id)).data;
+    if(epoch!==ORG_EPOCH){ _cuoRefreshing=false; return; } // la org cambió mientras volaba el fetch: son cuotas de la org vieja, no pisar DB
     if(fresh){
       const mapped=fresh.map(c=>({id:c.id,sale_id:c.sale_id,numero:c.numero,monto:+c.monto,due_date:c.due_date,status:c.status,paid_date:c.paid_date,paid_amount:c.paid_amount==null?null:+c.paid_amount}));
       if(JSON.stringify(mapped)!==JSON.stringify(DB.cuotas||[])){ DB.cuotas=mapped; save(); if(state.view==='caja') renderCaja(); }
