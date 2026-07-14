@@ -619,7 +619,7 @@ async function captureGhl(req, res, member, url) {
   try {
     const pr = await fetch(
       SUPABASE_URL + '/rest/v1/st_profiles?id=eq.' + encodeURIComponent(targetId)
-        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,active,ghl_user_id',
+        + '&org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,sales_role,active,ghl_user_id',
       { headers: svcHeaders() }
     );
     prof = (await pr.json().catch(() => []))[0];
@@ -627,6 +627,11 @@ async function captureGhl(req, res, member, url) {
     return sendJSON(res, 502, { error: 'No se pudo leer el perfil del miembro' });
   }
   if (!prof || prof.active === false) return sendJSON(res, 404, { error: 'Miembro no encontrado o inactivo' });
+  // Rol efectivo (comercial) que mide el motor: un admin que además vende usa su
+  // sales_role, igual que el nocturno (runShadowForOrg más abajo). Si no, admin
+  // crudo no matchea 'closer'/'setter' en ningún lado y captureGhl devolvía
+  // metrics vacío para el dueño que también cierra ventas.
+  const effRole = prof.role === 'admin' ? prof.sales_role : prof.role;
 
   let creds;
   try { creds = await getGhlCreds(orgId); } catch {
@@ -635,7 +640,7 @@ async function captureGhl(req, res, member, url) {
   if (!creds) return sendJSON(res, 501, { error: 'GHL no está configurado en esta instancia' });
   const calendarId = (creds.integration && creds.integration.calendar_id) || GHL_CALENDAR;
   // El calendario de llamadas es del closer; el setter no lo necesita (usa sus agenda cals).
-  if (prof.role === 'closer' && !calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
+  if (effRole === 'closer' && !calendarId) return sendJSON(res, 501, { error: 'Elegí el calendario de llamadas en Configuraciones → Integración HighLevel' });
 
   // TZ de la org para cortar el día donde corresponde.
   let tz = 'America/Argentina/Buenos_Aires';
