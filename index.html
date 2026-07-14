@@ -232,7 +232,7 @@
   .footnote a{color:var(--muted);border-bottom:1px dotted var(--faint)}
 
   /* tooltips — bubble global sobre body (escapa overflow de contenedores) */
-  .tipbox{position:fixed;display:none;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12px;line-height:1.45;padding:8px 11px;border-radius:9px;max-width:260px;z-index:9999;box-shadow:0 12px 34px rgba(0,0,0,.5);pointer-events:none}
+  .tipbox{position:fixed;display:none;white-space:pre-line;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);font-size:12px;line-height:1.45;padding:8px 11px;border-radius:9px;max-width:340px;z-index:9999;box-shadow:0 12px 34px rgba(0,0,0,.5);pointer-events:none}
   [data-tip]{cursor:help}
   .info{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--faint);color:var(--faint);font-size:9.5px;font-weight:700;cursor:help;margin-left:6px;vertical-align:middle;font-style:normal}
   .info:hover{color:var(--lime-ink);border-color:var(--lima-dim)}
@@ -399,47 +399,47 @@ let ME=null, IS_ADMIN=false;
 // ---------- Diccionario de métricas (definiciones embebidas) ----------
 const METRICS = {
   setter: [
-    {k:'outbound', label:'Outbound', def:'Conversaciones que YO inicié en frío (yo voy a la gente).'},
-    {k:'inbound_ig', label:'Inbound IG', def:'Personas que ME escribieron por Instagram.'},
-    {k:'inbound_wpp_tk', label:'Inbound Wpp·TikTok', def:'Mensajes recibidos por el WhatsApp de TikTok.'},
-    {k:'inbound_wpp_ig', label:'Inbound Wpp·IG', def:'Mensajes recibidos por el WhatsApp de Instagram.'},
+    {k:'outbound', label:'Outbound', def:'Vos abriste la conversación con alguien nuevo.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ESE MISMO DÍA, y el primer mensaje de la conversación es tuyo, humano (no ManyChat), y salió ese día. Se cuenta 1 por contacto, no por mensaje.\n\nTikTok NO entra acá: va en Outbound TikTok.'},
+    {k:'inbound_ig', label:'Inbound IG', def:'Te escribió alguien nuevo por Instagram, sin que vos le hablaras antes.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ese mismo día y el PRIMER mensaje de la conversación es entrante, por Instagram. Se cuenta 1 por contacto.'},
+    {k:'inbound_wpp_tk', label:'Inbound Wpp·TikTok', def:'Te escribió alguien nuevo por WhatsApp, y venía de TikTok.\n\nCÓMO SE MIDE: contacto nuevo del día, primer mensaje entrante por WhatsApp, y el origen TikTok sale del campo utm_source del contacto o de un tag "origen:". Si el contacto no trae ninguno de los dos, cae en "Inbound Wpp (sin canal)".'},
+    {k:'inbound_wpp_ig', label:'Inbound Wpp·IG', def:'Te escribió alguien nuevo por WhatsApp, y venía de Instagram.\n\nCÓMO SE MIDE: contacto nuevo del día, primer mensaje entrante por WhatsApp, y el origen Instagram sale del campo utm_source del contacto o de un tag "origen:". Si el contacto no trae ninguno de los dos, cae en "Inbound Wpp (sin canal)".'},
     {k:'inbound_wpp_sin_canal', label:'Inbound Wpp (sin canal)', def:'Te escribieron por WhatsApp, pero no pudimos determinar si venían de Instagram o de TikTok.\n\nCÓMO SE MIDE: el contacto es nuevo (dado de alta hoy en el CRM) y el primer mensaje de la conversación es entrante por WhatsApp, pero el contacto no tiene el campo utm_source ni un tag "origen:" que diga de dónde vino.\n\nSi este número es alto, tus inbounds de WhatsApp están mal atribuidos: entrá a los contactos (clic en el punto de la celda) y revisá por qué no traen origen.'},
-    {k:'bienvenidas', label:'Bienvenidas', def:'Bienvenidas automáticas (ManyChat).'},
-    {k:'cta', label:'CTA', def:'Respuestas a call-to-action de feed o historias.'},
-    {k:'respuestas', label:'Respuestas', def:'Respuestas obtenidas a nuestros mensajes.'},
-    {k:'seg_ig', label:'Seguimientos IG', def:'Seguimientos hechos por Instagram.'},
-    {k:'seg_wpp', label:'Seguimientos Wpp', def:'Seguimientos hechos por WhatsApp.'},
-    {k:'outbound_tk', label:'Outbound TikTok', def:'Mensajes en frío que YO inicié por TikTok.'},
-    {k:'resp_tk', label:'Respuestas TikTok', def:'Respuestas obtenidas al outbound de TikTok.'},
-    {k:'inbound_tk', label:'Inbound TikTok', def:'Personas que ME escribieron por el DM nativo de TikTok.'},
-    {k:'seg_tk', label:'Seguimientos TikTok', def:'Seguimientos hechos por el DM nativo de TikTok.'},
-    {k:'ads_inbound', label:'ADS inbound', def:'Personas que ME escribieron llegando desde un anuncio.'},
-    {k:'ads_seg', label:'ADS seguimiento', def:'Seguimientos hechos a leads que llegaron por anuncios.'},
-    {k:'links_ig', label:'Links agenda IG', def:'Links de agenda enviados por Instagram.'},
-    {k:'links_wpp', label:'Links agenda Wpp', def:'Links de agenda enviados por WhatsApp.'},
-    {k:'agend_ig', label:'Agendados IG', def:'Llamadas agendadas vía Instagram.'},
-    {k:'agend_wpp', label:'Agendados Wpp', def:'Llamadas agendadas vía WhatsApp.'},
+    {k:'bienvenidas', label:'Bienvenidas', def:'El mensaje automático de bienvenida (ManyChat) que abrió la conversación.\n\nCÓMO SE MIDE: SOLO Instagram. El primer mensaje de la conversación es saliente pero AUTOMÁTICO (no lo escribiste vos: la API lo marca como enviado por una automatización), y salió ese día.\n\nNo cuenta como Outbound: Outbound son solo los que abriste vos a mano.'},
+    {k:'cta', label:'CTA', def:'Respuestas a un call-to-action de feed o historias.\n\nSE CARGA A MANO: HighLevel no la puede detectar sola. Requiere instrumentar ManyChat para que etiquete al contacto cuando llega por un CTA.'},
+    {k:'respuestas', label:'Respuestas', def:'Te contestó alguien con quien YA venías hablando.\n\nCÓMO SE MIDE: el contacto NO es nuevo (fue dado de alta otro día) y mandó al menos un mensaje entrante ese día. Se cuenta 1 por contacto, no por mensaje.\n\nTikTok va aparte, en Respuestas TikTok.'},
+    {k:'seg_ig', label:'Seguimientos IG', def:'Le escribiste a alguien en una conversación que ya venía de antes, por Instagram.\n\nCÓMO SE MIDE: la conversación NO empezó ese día, y vos mandaste al menos un mensaje humano (no ManyChat) ese día. Se cuenta 1 por conversación.'},
+    {k:'seg_wpp', label:'Seguimientos Wpp', def:'Le escribiste a alguien en una conversación que ya venía de antes, por WhatsApp.\n\nCÓMO SE MIDE: la conversación NO empezó ese día, y vos mandaste al menos un mensaje humano (no ManyChat) ese día. Se cuenta 1 por conversación.'},
+    {k:'outbound_tk', label:'Outbound TikTok', def:'Vos abriste la conversación con alguien nuevo, por TikTok.\n\nCÓMO SE MIDE: igual que Outbound (contacto nuevo del día + primer mensaje tuyo y humano), pero en el DM nativo de TikTok.\n\nOJO: el WhatsApp que viene de TikTok NO es esto — eso es Inbound Wpp·TikTok.'},
+    {k:'resp_tk', label:'Respuestas TikTok', def:'Te contestó por TikTok alguien con quien ya venías hablando.\n\nCÓMO SE MIDE: el contacto NO es nuevo y mandó al menos un mensaje entrante ese día, en el DM nativo de TikTok.'},
+    {k:'inbound_tk', label:'Inbound TikTok', def:'Te escribió alguien nuevo por TikTok, sin que vos le hablaras antes.\n\nCÓMO SE MIDE: contacto nuevo del día y el primer mensaje de la conversación es entrante, en el DM nativo de TikTok.'},
+    {k:'seg_tk', label:'Seguimientos TikTok', def:'Le escribiste por TikTok a alguien en una conversación que ya venía de antes.\n\nCÓMO SE MIDE: la conversación NO empezó ese día, y vos mandaste al menos un mensaje humano ese día.'},
+    {k:'ads_inbound', label:'ADS inbound', def:'Te escribió alguien que llegó desde un anuncio.\n\nSE CARGA A MANO: todavía no se detecta sola. La atribución de ADS sale de attributionSource.adId en el contacto de HighLevel, pendiente de validar con un lead real de anuncios.'},
+    {k:'ads_seg', label:'ADS seguimiento', def:'Le hiciste seguimiento a alguien que llegó desde un anuncio.\n\nSE CARGA A MANO: mismo motivo que ADS inbound.'},
+    {k:'links_ig', label:'Links agenda IG', def:'Links de agenda que mandaste por Instagram.\n\nCÓMO SE MIDE: mensajes tuyos, humanos, enviados ese día por Instagram, cuyo texto contiene alguno de los dominios de agenda configurados (Configuraciones → panel de calibración).\n\nSe cuenta POR MENSAJE, no por contacto: si le mandás el link dos veces a la misma persona, suma 2.\n\nSi no configuraste dominios de agenda, esta métrica siempre da 0.'},
+    {k:'links_wpp', label:'Links agenda Wpp', def:'Links de agenda que mandaste por WhatsApp.\n\nCÓMO SE MIDE: mensajes tuyos, humanos, enviados ese día por WhatsApp, cuyo texto contiene alguno de los dominios de agenda configurados.\n\nSe cuenta POR MENSAJE, no por contacto.\n\nSi no configuraste dominios de agenda, esta métrica siempre da 0.'},
+    {k:'agend_ig', label:'Agendados IG', def:'Personas a las que les mandaste el link por Instagram y terminaron agendando.\n\nCÓMO SE MIDE: cruce entre el link que mandaste y las citas del calendario. Si le mandaste el link a un contacto ese día, y ese contacto tiene una cita agendada dentro de los 7 DÍAS siguientes, cuenta como agendado tuyo.\n\nNo importa a quién esté asignada la cita (suele quedar en el closer): la atribución es por contacto. Una agenda por contacto, aunque aparezca en varios calendarios.\n\nNecesita los calendarios de agenda configurados.'},
+    {k:'agend_wpp', label:'Agendados Wpp', def:'Personas a las que les mandaste el link por WhatsApp y terminaron agendando.\n\nCÓMO SE MIDE: mismo cruce que Agendados IG — link enviado ese día + cita del contacto dentro de los 7 días siguientes, en los calendarios de agenda configurados.'},
   ],
   triage: [
-    {k:'agendadas', label:'Agendadas', def:'Llamadas agendadas que llegaron al triage.'},
-    {k:'asistencias', label:'Asistencias', def:'Personas que asistieron a la llamada de triage.'},
-    {k:'no_shows', label:'Canceladas / No-show', def:'Canceladas o que no se presentaron.'},
-    {k:'pases', label:'Pases a closer', def:'Llamadas pasadas al closer.'},
+    {k:'agendadas', label:'Agendadas', def:'Llamadas de triage que te agendaron.\n\nSE CARGA A MANO: el motor de HighLevel todavía no calcula las métricas de triage — requiere un calendario de triage propio por organización.'},
+    {k:'asistencias', label:'Asistencias', def:'Llamadas de triage a las que la persona asistió.\n\nSE CARGA A MANO: igual que Agendadas.'},
+    {k:'no_shows', label:'Canceladas / No-show', def:'Llamadas de triage que se cancelaron o a las que no asistieron.\n\nSE CARGA A MANO: igual que Agendadas.'},
+    {k:'pases', label:'Pases a closer', def:'Personas que pasaste al closer después del triage.\n\nSE CARGA A MANO: igual que Agendadas.'},
   ],
   closer: [
-    {k:'disponibilidad', label:'Disponibilidad', def:'Cupos de llamada disponibles hoy en el calendario.'},
-    {k:'llamadas', label:'Llamadas', def:'Llamadas tomadas hoy.'},
-    {k:'segundas', label:'Segundas llamadas', def:'Segundas llamadas de días anteriores.'},
-    {k:'asistencias', label:'Asistencias', def:'Personas que asistieron a la llamada.'},
-    {k:'ofertas', label:'Ofertas', def:'Ofertas presentadas (si no calificó, no se presenta).'},
-    {k:'cancelados', label:'Cancelados', def:'Llamadas canceladas.'},
-    {k:'no_shows', label:'No-shows', def:'No se presentaron a la llamada.'},
-    {k:'cierres', label:'Cierres', def:'Ventas cerradas hoy.'},
-    {k:'referidos', label:'Referidos', def:'Referidos obtenidos en la llamada.'},
-    {k:'cash_nuevo', label:'Cash nuevo ($)', def:'Cash collected líquido nuevo (entró hoy).', money:true},
-    {k:'cash_cuotas', label:'Cash cuotas ($)', def:'Cash de cuotas de clientes anteriores.', money:true},
-    {k:'reservas', label:'Reservas ($)', def:'Dinero dejado en reserva.', money:true},
-    {k:'revenue', label:'Revenue ($)', def:'Facturado hoy (contratos firmados).', money:true},
+    {k:'disponibilidad', label:'Disponibilidad', def:'Slots de llamada que ofreciste en el día.\n\nSE CARGA A MANO: HighLevel no sabe cuántos slots ofreciste, solo cuáles se ocuparon.\n\nEs el denominador de "% Ocupación".'},
+    {k:'llamadas', label:'Llamadas', def:'Llamadas que tenías agendadas ese día.\n\nCÓMO SE MIDE: citas del calendario de llamadas configurado, ASIGNADAS A VOS, que empiezan ese día y NO están canceladas ni son inválidas. Se cuenta por cita, no por contacto.\n\nSi una cita no está asignada a tu usuario de HighLevel, no cuenta.'},
+    {k:'segundas', label:'Segundas llamadas', def:'Llamadas con alguien que ya te había asistido antes.\n\nCÓMO SE MIDE: de tus llamadas válidas del día, las de contactos que YA tuvieron una cita marcada como "asistió" (showed) en los 30 días previos.'},
+    {k:'asistencias', label:'Asistencias', def:'Llamadas a las que la persona efectivamente asistió.\n\nCÓMO SE MIDE: tus citas válidas del día cuyo estado en HighLevel es exactamente "showed". Ningún otro estado cuenta como asistencia — si el closer no marca el estado, la llamada no suma acá.'},
+    {k:'ofertas', label:'Ofertas', def:'Llamadas en las que llegaste a presentar la oferta.\n\nSE CARGA A MANO: HighLevel no sabe qué pasó dentro de la llamada.\n\nEs el denominador de "% Cierre".'},
+    {k:'cancelados', label:'Cancelados', def:'Citas del día que se cancelaron.\n\nCÓMO SE MIDE: citas del calendario que empiezan ese día y cuyo estado en HighLevel es "cancelled". No entran en Llamadas (que solo cuenta las válidas).'},
+    {k:'no_shows', label:'No-shows', def:'Personas que no aparecieron a la llamada.\n\nCÓMO SE MIDE: tus citas válidas del día cuyo estado en HighLevel es exactamente "noshow".'},
+    {k:'cierres', label:'Cierres', def:'Ventas que cerraste ese día.\n\nCÓMO SE MIDE: sale del propio tracker (módulo Ventas), no de HighLevel: ventas cargadas con vos como closer y con fecha de venta ese día.'},
+    {k:'referidos', label:'Referidos', def:'Referidos que te dieron en las llamadas.\n\nSE CARGA A MANO: HighLevel no lo sabe.'},
+    {k:'cash_nuevo', label:'Cash nuevo ($)', def:'Plata que entró de las ventas que cerraste ese día.\n\nCÓMO SE MIDE: suma del campo "cash" de tus ventas del día (módulo Ventas del tracker).', money:true},
+    {k:'cash_cuotas', label:'Cash cuotas ($)', def:'Plata de cuotas que se cobró ese día, de ventas tuyas.\n\nCÓMO SE MIDE: suma de las cuotas marcadas como pagadas con fecha de cobro ese día, de cualquier venta tuya (sin importar cuándo se cerró la venta).', money:true},
+    {k:'reservas', label:'Reservas ($)', def:'Reservas (señas) de las ventas que cerraste ese día.\n\nCÓMO SE MIDE: suma del campo "reserva" de tus ventas del día.', money:true},
+    {k:'revenue', label:'Revenue ($)', def:'Total facturado de las ventas que cerraste ese día.\n\nCÓMO SE MIDE: suma del campo "facturado" de tus ventas del día. Es el valor del contrato, no lo que efectivamente entró (eso es Cash).', money:true},
   ],
 };
 const ROLE_LABEL = {setter:'Setter', triage:'Triage', closer:'Closer'};
@@ -1092,20 +1092,20 @@ function derivedRows(role, dayList){
   const get=(ds,k)=>{ const key=state.tblMember+'|'+ds; return (DB.entries[key]&&+DB.entries[key][k])||0; };
   const defs={
     setter:[
-      {label:'Conversaciones nuevas', def:'Outbound + todos los inbound.', num:ds=>get(ds,'outbound')+get(ds,'inbound_ig')+get(ds,'inbound_wpp_tk')+get(ds,'inbound_wpp_ig')},
-      {label:'Total links', def:'Links de agenda IG + Wpp.', num:ds=>get(ds,'links_ig')+get(ds,'links_wpp')},
-      {label:'Total agendados', def:'Agendados IG + Wpp.', num:ds=>get(ds,'agend_ig')+get(ds,'agend_wpp')},
-      {label:'Tasa link→agenda', def:'Agendados ÷ links enviados.', pct:ds=>[get(ds,'agend_ig')+get(ds,'agend_wpp'), get(ds,'links_ig')+get(ds,'links_wpp')]},
-      {label:'% respuesta outbound TikTok', def:'Respuestas ÷ outbound de TikTok.', pct:ds=>[get(ds,'resp_tk'), get(ds,'outbound_tk')]},
+      {label:'Conversaciones nuevas', def:'Subtotal: todas las conversaciones que se abrieron con contactos nuevos ese día.\n\nFÓRMULA: outbound + inbound IG + inbound Wpp·TikTok + inbound Wpp·IG + inbound Wpp sin canal + outbound TikTok + inbound TikTok.\n\nNo incluye bienvenidas (son automáticas), ni respuestas ni seguimientos (esos son contactos que ya existían).', num:ds=>get(ds,'outbound')+get(ds,'inbound_ig')+get(ds,'inbound_wpp_tk')+get(ds,'inbound_wpp_ig')+get(ds,'inbound_wpp_sin_canal')+get(ds,'outbound_tk')+get(ds,'inbound_tk')},
+      {label:'Total links', def:'Subtotal: links de agenda que enviaste.\n\nFÓRMULA: links agenda IG + links agenda Wpp.\n\nCuenta por mensaje: si mandás el link dos veces a la misma persona, suma 2.', num:ds=>get(ds,'links_ig')+get(ds,'links_wpp')},
+      {label:'Total agendados', def:'Subtotal: personas que agendaron a partir de tu link.\n\nFÓRMULA: agendados IG + agendados Wpp.', num:ds=>get(ds,'agend_ig')+get(ds,'agend_wpp')},
+      {label:'Tasa link→agenda', def:'De cada 100 links que mandaste, cuántos terminaron en una cita agendada.\n\nFÓRMULA: (agendados IG + agendados Wpp) ÷ (links IG + links Wpp).\n\nOJO: el cruce link→cita tiene una ventana de 7 días. Si la persona agenda al día 8, no cuenta.', pct:ds=>[get(ds,'agend_ig')+get(ds,'agend_wpp'), get(ds,'links_ig')+get(ds,'links_wpp')]},
+      {label:'% respuesta outbound TikTok', def:'De cada 100 personas que abriste en frío por TikTok, cuántas te contestaron.\n\nFÓRMULA: respuestas TikTok ÷ outbound TikTok.', pct:ds=>[get(ds,'resp_tk'), get(ds,'outbound_tk')]},
     ],
     triage:[
-      {label:'% Asistencia', def:'Asistencias ÷ agendadas.', pct:ds=>[get(ds,'asistencias'),get(ds,'agendadas')]},
-      {label:'% Pases a closer', def:'Pases ÷ agendadas.', pct:ds=>[get(ds,'pases'),get(ds,'agendadas')]},
+      {label:'% Asistencia', def:'De cada 100 llamadas de triage agendadas, cuántas asistieron.\n\nFÓRMULA: asistencias ÷ agendadas.\n\nLos dos números se cargan a mano.', pct:ds=>[get(ds,'asistencias'),get(ds,'agendadas')]},
+      {label:'% Pases a closer', def:'De cada 100 llamadas de triage agendadas, cuántas pasaste al closer.\n\nFÓRMULA: pases ÷ agendadas.\n\nLos dos números se cargan a mano.', pct:ds=>[get(ds,'pases'),get(ds,'agendadas')]},
     ],
     closer:[
-      {label:'% Ocupación', def:'Llamadas tomadas ÷ disponibilidad.', pct:ds=>[get(ds,'llamadas'),get(ds,'disponibilidad')]},
-      {label:'% Cierre', def:'Cierres ÷ ofertas presentadas.', pct:ds=>[get(ds,'cierres'),get(ds,'ofertas')]},
-      {label:'Cash total', def:'Cash nuevo + cash de cuotas.', money:ds=>get(ds,'cash_nuevo')+get(ds,'cash_cuotas')},
+      {label:'% Ocupación', def:'Qué parte de los slots que ofreciste se llenaron con llamadas.\n\nFÓRMULA: llamadas ÷ disponibilidad.\n\nDisponibilidad se carga a mano: si no la cargás, esta tasa queda vacía.', pct:ds=>[get(ds,'llamadas'),get(ds,'disponibilidad')]},
+      {label:'% Cierre', def:'De cada 100 ofertas que presentaste, cuántas cerraron.\n\nFÓRMULA: cierres ÷ ofertas.\n\nOfertas se carga a mano: si no la cargás, esta tasa queda vacía.', pct:ds=>[get(ds,'cierres'),get(ds,'ofertas')]},
+      {label:'Cash total', def:'Subtotal de la plata que entró ese día.\n\nFÓRMULA: cash nuevo + cash de cuotas.\n\nNo incluye las reservas: esas se muestran aparte.', money:ds=>get(ds,'cash_nuevo')+get(ds,'cash_cuotas')},
     ],
   };
   const T=todayStr(); let out='';
