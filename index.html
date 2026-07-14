@@ -588,7 +588,9 @@ function sumRole(role, start, end){
 
 function funnel(start, end){
   const s=sumRole('setter',start,end), t=sumRole('triage',start,end), c=sumRole('closer',start,end);
-  const conversaciones=(s.outbound||0)+(s.inbound_ig||0)+(s.inbound_wpp_tk||0)+(s.inbound_wpp_ig||0);
+  // Misma fórmula que STAGE_SPEC.conversaciones y derivedRows() (Vista Tabla): sin esto, el
+  // número del embudo del dashboard queda distinto al de la Vista Tabla y a su propio drill-down.
+  const conversaciones=(s.outbound||0)+(s.inbound_ig||0)+(s.inbound_wpp_tk||0)+(s.inbound_wpp_ig||0)+(s.inbound_wpp_sin_canal||0)+(s.outbound_tk||0)+(s.inbound_tk||0);
   const respuestas=s.respuestas||0;
   const links=(s.links_ig||0)+(s.links_wpp||0);
   const agendados=(s.agend_ig||0)+(s.agend_wpp||0);
@@ -802,7 +804,10 @@ function rollupSection(){
 function curPeriod(){ return range(state.ptype, parseD(state.ref)); }
 function keyLabels(role){ const m={}; (METRICS[role]||[]).forEach(x=>m[x.k]=x.label); return m; }
 const STAGE_SPEC={
-  conversaciones:{label:'Conversaciones nuevas',def:'Outbound + todos los inbound del período.',roles:['setter'],keys:['outbound','inbound_ig','inbound_wpp_tk','inbound_wpp_ig']},
+  // Misma fórmula que "Conversaciones nuevas" en derivedRows() (Vista Tabla): hay que sumar
+  // TikTok (outbound_tk, inbound_tk) y el inbound de Wpp sin canal resuelto, si no el drill-down
+  // del embudo queda corto contra la tabla.
+  conversaciones:{label:'Conversaciones nuevas',def:'Outbound + todos los inbound del período (incluye TikTok y Wpp sin canal).',roles:['setter'],keys:['outbound','inbound_ig','inbound_wpp_tk','inbound_wpp_ig','inbound_wpp_sin_canal','outbound_tk','inbound_tk']},
   respuestas:{label:'Respuestas',def:'Respuestas obtenidas a los mensajes.',roles:['setter'],keys:['respuestas']},
   links:{label:'Links enviados',def:'Links de agenda enviados (IG + Wpp).',roles:['setter'],keys:['links_ig','links_wpp']},
   agendados:{label:'Agendados',def:'Llamadas agendadas por el setter (IG + Wpp).',roles:['setter'],keys:['agend_ig','agend_wpp']},
@@ -891,7 +896,9 @@ function closeDrill(){ const ov=document.getElementById('drillOv'); if(ov) ov.st
 function drillEsc(e){ if(e.key==='Escape') closeDrill(); }
 window.drillStage=(k)=>{ const d=STAGE_SPEC[k]; let roles=d.roles.slice(); if(k==='asistencias' && membersByRole('closer').length===0) roles=['triage']; openDrill({kind:'sum',label:d.label,def:d.def,roles,keys:d.keys,money:d.money,period:curPeriod()}); };
 window.drillConv=(fromK,toK)=>{ const f=STAGE_SPEC[fromK], t=STAGE_SPEC[toK]; let troles=t.roles.slice(); if(toK==='asistencias'&&membersByRole('closer').length===0) troles=['triage']; openDrill({kind:'rate',label:'Conversión '+f.label+' → '+t.label,def:'Qué porcentaje de '+f.label.toLowerCase()+' llega a '+t.label.toLowerCase()+'.',num:{label:t.label,roles:troles,keys:t.keys},den:{label:f.label,roles:f.roles,keys:f.keys},period:curPeriod()}); };
-window.drillLead=()=>{ openDrill({kind:'rate',label:'Lead → cierre',def:'Qué % de las conversaciones nuevas termina en cierre.',num:{label:'Cierres',roles:['closer'],keys:['cierres']},den:{label:'Conversaciones',roles:['setter'],keys:['outbound','inbound_ig','inbound_wpp_tk','inbound_wpp_ig']},period:curPeriod()}); };
+// Denominador = STAGE_SPEC.conversaciones.keys (no lo duplicamos a mano para que no se desalinee
+// de nuevo si mañana se agrega otro canal).
+window.drillLead=()=>{ openDrill({kind:'rate',label:'Lead → cierre',def:'Qué % de las conversaciones nuevas termina en cierre.',num:{label:'Cierres',roles:['closer'],keys:['cierres']},den:{label:'Conversaciones',roles:['setter'],keys:STAGE_SPEC.conversaciones.keys},period:curPeriod()}); };
 window.drillCell=(ptype,metric)=>{ const d=STAGE_SPEC[metric]; let roles=d.roles.slice(); if(metric==='asistencias'&&membersByRole('closer').length===0) roles=['triage']; openDrill({kind:'sum',label:d.label,def:d.def,roles,keys:d.keys,money:d.money,period:range(ptype,parseD(state.ref))}); };
 window.drillRep=(mid,metric)=>{ const m=DB.members.find(x=>x.id===mid); if(!m) return; const r=m.role;
   const S={
