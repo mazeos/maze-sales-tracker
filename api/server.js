@@ -653,15 +653,19 @@ async function captureGhl(req, res, member, url) {
 
   // Ventas y cuotas del tracker (fuente de verdad interna) — se las damos al motor,
   // que calcula cierres/cash/reservas/revenue/cash_cuotas con la misma regla del modo sombra.
+  // Filtramos por closer_id (el motor igual filtra por member.id, api/metrics.js:80,85)
+  // para no traer TODA la historia de ventas de la org: con ~200 ventas, un
+  // `sale_id=in.(...)` de 37 chars por UUID pasa los 8 KB y PostgREST/nginx lo
+  // cortan (414/400) → svcGet devuelve [] → cash_cuotas=0 → y ese 0 se persistía
+  // pisando el valor bueno. Leemos st_cuotas por org_id (igual que el nocturno,
+  // ~api/server.js:761) en vez de por lista de ids.
   let salesRows = [], cuotasRows = [];
-  if (prof.role === 'closer') {
+  if (effRole === 'closer') {
     salesRows = await svcGet('st_sales?org_id=eq.' + encodeURIComponent(orgId)
+      + '&closer_id=eq.' + encodeURIComponent(targetId)
       + '&select=id,closer_id,sale_date,cash,reserva,facturado');
-    const ids = salesRows.map((s) => s.id);
-    if (ids.length) {
-      cuotasRows = await svcGet('st_cuotas?sale_id=in.(' + ids.map(encodeURIComponent).join(',') + ')'
-        + '&select=sale_id,status,paid_date,paid_amount');
-    }
+    cuotasRows = await svcGet('st_cuotas?org_id=eq.' + encodeURIComponent(orgId)
+      + '&select=sale_id,status,paid_date,paid_amount');
   }
 
   // Un solo motor para todos los roles: el mismo del modo sombra. Se llama SIEMPRE,
@@ -682,7 +686,7 @@ async function captureGhl(req, res, member, url) {
     result = await computeMemberKpis({
       ghlBase: GHL_BASE, token: creds.token, locationId: creds.locationId,
       calendarId, tz, date,
-      member: { id: targetId, role: prof.role, ghl_user_id: prof.ghl_user_id },
+      member: { id: targetId, role: effRole, ghl_user_id: prof.ghl_user_id },
       salesRows, cuotasRows, bookingDomains, agendaCalendarIds,
     });
   } catch {
@@ -720,7 +724,7 @@ async function captureGhl(req, res, member, url) {
     }
   }
 
-  return sendJSON(res, 200, { date, member_id: targetId, role: prof.role, metrics, contacts });
+  return sendJSON(res, 200, { date, member_id: targetId, role: effRole, metrics, contacts });
 }
 
 // ---------- Auto-carga Fase A: modo sombra ----------
