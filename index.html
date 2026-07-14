@@ -267,6 +267,11 @@
   .grid tr.drow td.tot{background:#171720}
   .grid .lbl{cursor:help}
   .grid .lbl:hover{color:var(--lime-ink)}
+  .cell-td{position:relative}
+  .cell-dot{position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--lima);cursor:pointer;opacity:.65}
+  .cell-dot:hover{opacity:1;transform:scale(1.35)}
+  .cell-panel{position:absolute;top:100%;right:0;z-index:60;min-width:240px;max-width:320px;max-height:280px;overflow-y:auto;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;box-shadow:0 12px 34px rgba(0,0,0,.5);text-align:left}
+  .cell-panel-h{padding:8px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface-2)}
 
   /* ---------- Tema claro ---------- */
   body[data-theme="light"]{
@@ -1020,6 +1025,23 @@ window.setMoney=(k,val)=>{
 };
 
 // ---------- Tabla (día por día, estilo Google Sheets / Airtable) ----------
+// Desglose de contactos por (kpi, día) del miembro y mes visibles en la Vista Tabla.
+// Sale de st_shadow_metrics (lo persiste /api/capture/ghl al traer de HighLevel).
+let TBL_CONTACTS={}, TBL_CONTACTS_KEY=null;
+async function loadTblContacts(memberId, desde, hasta){
+  const ck=`${memberId}|${desde}`;
+  if(TBL_CONTACTS_KEY===ck) return; // ya cargado para este miembro+mes
+  const epoch=ORG_EPOCH;
+  const { data } = await sb.from('st_shadow_metrics')
+    .select('metric_date,kpi,contacts')
+    .eq('org_id',ME.org_id).eq('member_id',memberId)
+    .gte('metric_date',desde).lte('metric_date',hasta);
+  if(epoch!==ORG_EPOCH) return; // la org cambió mientras esperábamos: son datos de la org vieja
+  const idx={};
+  (data||[]).forEach(r=>{ if(Array.isArray(r.contacts) && r.contacts.length) idx[`${r.kpi}|${r.metric_date}`]=r.contacts; });
+  TBL_CONTACTS=idx; TBL_CONTACTS_KEY=ck;
+  if(state.view==='table') renderTable();
+}
 function renderTable(){
   if(!state.tblMember || !DB.members.find(m=>m.id===state.tblMember)) state.tblMember = DB.members[0]?DB.members[0].id:null;
   if(!state.tblRef) state.tblRef = todayStr();
@@ -1031,6 +1053,7 @@ function renderTable(){
     const ref=parseD(state.tblRef); const y=ref.getFullYear(), mo=ref.getMonth();
     const days=new Date(y,mo+1,0).getDate();
     const dayList=[]; for(let d=1;d<=days;d++) dayList.push(dstr(new Date(y,mo,d)));
+    loadTblContacts(state.tblMember, dayList[0], dayList[dayList.length-1]); // async, re-renderiza al terminar (patrón de loadGhlStatus)
     const T=todayStr();
     // cabecera
     let head='<tr><th class="stickyc">Métrica</th>';
@@ -1042,7 +1065,11 @@ function renderTable(){
     METRICS[member.role].forEach(mt=>{
       let tot=0, cells='';
       dayList.forEach(ds=>{ const key=state.tblMember+'|'+ds; const v=(DB.entries[key]&&+DB.entries[key][mt.k])||0; tot+=v; const isT=ds===T;
-        cells+=`<td class="${isT?'today':''}"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)" ${canEdit?'':'readonly'}></td>`; });
+        const cs=TBL_CONTACTS[`${mt.k}|${ds}`];
+        const cid=`tc_${mt.k}_${ds}`;
+        const dot=cs?`<span class="cell-dot" onclick="toggleCellContacts('${cid}')" data-tip="${cs.length} contacto${cs.length>1?'s':''} de HighLevel — clic para ver"></span>`:'';
+        const panel=cs?cellContactsPanel(cid, mt.label, ds, cs):'';
+        cells+=`<td class="${isT?'today':''} cell-td"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)" ${canEdit?'':'readonly'}>${dot}${panel}</td>`; });
       rows+=`<tr><td class="stickyc lbl" data-tip="${esc(mt.def)}">${mt.label}</td>${cells}<td class="tot">${mt.money?money(tot):tot}</td></tr>`;
     });
     // filas derivadas (tasas, read-only)
@@ -1092,6 +1119,24 @@ function derivedRows(role, dayList){
   });
   return out;
 }
+// Panel de contactos de una celda. Mismo patrón que el recap del panel de calibración.
+function cellContactsPanel(id, label, ds, cs){
+  const filas=cs.map((c,i)=>{
+    const txt=`${esc(c.name||'(sin nombre)')}${c.count?` <span style="color:var(--muted)">×${c.count}</span>`:''}`;
+    const row=`display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 12px;font-size:13px${i?';border-top:1px solid var(--line)':''}`;
+    return GHL_LOC
+      ? `<a href="https://app.mazefunnels.com/v2/location/${esc(GHL_LOC)}/contacts/detail/${esc(c.id)}" target="_blank" rel="noopener" style="${row};text-decoration:none;color:inherit"><span>${txt}</span><span style="opacity:.5">🔗</span></a>`
+      : `<div style="${row};color:var(--muted)"><span>${txt}</span></div>`;
+  }).join('');
+  const total=cs.reduce((a,c)=>a+(c.count||1),0);
+  return `<div id="${id}" class="cell-panel" style="display:none">
+    <div class="cell-panel-h">${esc(label)} · ${esc(ds)} · ${total} <span style="opacity:.6">(${cs.length} contacto${cs.length>1?'s':''})</span></div>
+    ${filas}</div>`;
+}
+window.toggleCellContacts=(id)=>{
+  document.querySelectorAll('.cell-panel').forEach(p=>{ if(p.id!==id) p.style.display='none'; }); // uno a la vez
+  const el=document.getElementById(id); if(el) el.style.display=el.style.display==='none'?'block':'none';
+};
 function bfShow(html){ let o=document.getElementById('bfOverlay'); if(!o){ o=document.createElement('div'); o.id='bfOverlay'; o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:100'; document.body.appendChild(o); } o.innerHTML=`<div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px;max-width:440px;width:90%">${html}</div>`; return o; }
 window.bfClose=()=>{ const o=document.getElementById('bfOverlay'); if(o) o.remove(); };
 // Backfill: trae la data de GHL del mes visible, día por día, vía /api/capture/ghl.
@@ -2146,7 +2191,7 @@ window.enterOrgAsSuper=async(i)=>{
   // Ningún dato de una org puede sobrevivir al cambio a otra.
   ORG_EPOCH++; // cierra la puerta a cualquier fetch en vuelo de la org anterior (guardia de época)
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
-  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
+  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null; TBL_CONTACTS={}; TBL_CONTACTS_KEY=null;
   // Los *_LOADING también se resetean acá (no solo en el finally de cada loader):
   // si había un fetch en vuelo de la org anterior, su propio finally lo va a
   // volver a poner en false igual (guardia de época), pero sin este reset la UI
@@ -2164,7 +2209,7 @@ window.exitSuperView=async()=>{
   // Invalidar el estado de HighLevel: no puede arrastrarse desde la org visitada.
   ORG_EPOCH++; // guardia de época: descarta cualquier fetch en vuelo de la org visitada
   GHL_STATUS=null; GHL_USERS=null; GHL_REMOVED=[]; GHL_AUTO_LINKED=[]; GHL_CALS=null;
-  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null;
+  GHL_LOC=null; GHL_LOC_ASKED=false; SHADOW=null; KPI_CFG=null; TBL_CONTACTS={}; TBL_CONTACTS_KEY=null;
   // Mismo criterio que enterOrgAsSuper: resetear acá evita quedar en "Cargando…"
   // hasta que la promesa vieja (de la org visitada) resuelva por su cuenta.
   GHL_LOADING=false; GHL_CALS_LOADING=false; GHL_USERS_LOADING=false; SHADOW_LOADING=false;
