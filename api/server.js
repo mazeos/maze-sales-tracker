@@ -703,23 +703,50 @@ async function captureGhl(req, res, member, url) {
   // Persistir lo calculado en st_shadow_metrics: así el desglose de contactos queda
   // guardado y la Vista Tabla no tiene que volver a pegarle a GHL para mostrarlo.
   // NO se toca manual_value: esa columna la escribe el worker nocturno del modo sombra.
+  //
+  // auto_value SOLO se persiste si `date` es HOY en la TZ de la org. El nocturno
+  // (runShadowForOrg/shadowTick, más abajo) calcula auto_value UNA VEZ, la noche
+  // que la fecha fue "hoy" — ese historial es la base del panel de calibración y
+  // es sagrado. El backfill de la Vista Tabla llama esta ruta para los 31 días del
+  // mes, pero recalcular una fecha pasada contra el estado de HOY de GHL da un
+  // número distinto (citas que mutaron confirmed→showed/noshow, o para setters,
+  // el motor pagina conversaciones hacia atrás desde ahora con tope 20×100 —
+  // api/metrics.js:108-118 — y para un día viejo con volumen se queda sin
+  // páginas antes de llegar ahí → subcuenta). Escribir ese recálculo pisaría el
+  // valor real de calibración con uno peor. Para fechas pasadas igual guardamos
+  // el desglose (contacts/computed_at) — mismo mecanismo que ya usa manual_value:
+  // la columna ausente del body no la toca el ON CONFLICT DO UPDATE de PostgREST.
+  //
+  // OJO: en un upsert bulk PostgREST deriva las columnas del primer objeto del
+  // array — por eso el shape (con o sin auto_value) tiene que ser el MISMO para
+  // todas las filas. Como `isToday` depende solo de `date` (compartido por todas
+  // las filas de esta llamada), es seguro.
+  const todayInTz = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  const isToday = date === todayInTz;
   const shadowRows = Object.entries(metrics)
     .filter(([, m]) => m.source === 'ghl' || m.source === 'ventas')
-    .map(([kpi, m]) => ({
-      org_id: orgId, member_id: targetId, metric_date: date, kpi,
-      auto_value: +m.value || 0,
-      contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
-      computed_at: new Date().toISOString(),
-    }));
+    .map(([kpi, m]) => {
+      const row = {
+        org_id: orgId, member_id: targetId, metric_date: date, kpi,
+        contacts: Array.isArray(contacts[kpi]) && contacts[kpi].length ? contacts[kpi] : null,
+        computed_at: new Date().toISOString(),
+      };
+      if (isToday) row.auto_value = +m.value || 0;
+      return row;
+    });
   if (shadowRows.length) {
     try {
-      await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/st_shadow_metrics?on_conflict=member_id,metric_date,kpi', {
         method: 'POST',
         headers: svcHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
         body: JSON.stringify(shadowRows),
       });
-    } catch {
-      console.error(`[api] GET /api/capture/ghl org=${orgId} shadow_upsert_fail date=${date} member=${targetId}`);
+      // fetch no lanza en 4xx/5xx: un status >=300 es un upsert que falló en
+      // silencio (columna desconocida, 401, 409, 413...) — chequearlo a mano,
+      // mismo patrón que runShadowForOrg (~api/server.js:792).
+      if (r.status >= 300) throw new Error('upsert sombra falló: ' + r.status);
+    } catch (e) {
+      console.error(`[api] GET /api/capture/ghl org=${orgId} shadow_upsert_fail date=${date} member=${targetId}: ${e.message}`);
       /* best-effort: los números igual se devuelven; solo se pierde el desglose guardado */
     }
   }
