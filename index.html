@@ -399,14 +399,14 @@ let ME=null, IS_ADMIN=false;
 // ---------- Diccionario de métricas (definiciones embebidas) ----------
 const METRICS = {
   setter: [
-    {k:'outbound', label:'Outbound', def:'Vos abriste la conversación con alguien nuevo.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ESE MISMO DÍA, y el primer mensaje de la conversación es tuyo, humano (no ManyChat), y salió ese día. Se cuenta 1 por contacto, no por mensaje.\n\nTikTok NO entra acá: va en Outbound TikTok.'},
-    {k:'inbound_ig', label:'Inbound IG', def:'Te escribió alguien nuevo por Instagram, sin que vos le hablaras antes.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ese mismo día y el PRIMER mensaje de la conversación es entrante, por Instagram. Se cuenta 1 por contacto.'},
+    {k:'outbound', label:'Outbound', def:'Vos abriste la conversación con alguien nuevo.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ESE MISMO DÍA, y el primer mensaje de la conversación es tuyo, humano (no ManyChat), y salió ese día. Se cuenta 1 por conversación, no por mensaje (si la misma persona tiene dos conversaciones, suma 2).\n\nTikTok NO entra acá: va en Outbound TikTok.'},
+    {k:'inbound_ig', label:'Inbound IG', def:'Te escribió alguien nuevo por Instagram, sin que vos le hablaras antes.\n\nCÓMO SE MIDE: el contacto fue dado de alta en el CRM ese mismo día y el PRIMER mensaje de la conversación es entrante, por Instagram. Se cuenta 1 por conversación.'},
     {k:'inbound_wpp_tk', label:'Inbound Wpp·TikTok', def:'Te escribió alguien nuevo por WhatsApp, y venía de TikTok.\n\nCÓMO SE MIDE: contacto nuevo del día, primer mensaje entrante por WhatsApp, y el origen TikTok sale del campo utm_source del contacto o de un tag "origen:". Si el contacto no trae ninguno de los dos, cae en "Inbound Wpp (sin canal)".'},
     {k:'inbound_wpp_ig', label:'Inbound Wpp·IG', def:'Te escribió alguien nuevo por WhatsApp, y venía de Instagram.\n\nCÓMO SE MIDE: contacto nuevo del día, primer mensaje entrante por WhatsApp, y el origen Instagram sale del campo utm_source del contacto o de un tag "origen:". Si el contacto no trae ninguno de los dos, cae en "Inbound Wpp (sin canal)".'},
     {k:'inbound_wpp_sin_canal', label:'Inbound Wpp (sin canal)', def:'Te escribieron por WhatsApp, pero no pudimos determinar si venían de Instagram o de TikTok.\n\nCÓMO SE MIDE: el contacto es nuevo (dado de alta hoy en el CRM) y el primer mensaje de la conversación es entrante por WhatsApp, pero el contacto no tiene el campo utm_source ni un tag "origen:" que diga de dónde vino.\n\nSi este número es alto, tus inbounds de WhatsApp están mal atribuidos: entrá a los contactos (clic en el punto de la celda) y revisá por qué no traen origen.'},
     {k:'bienvenidas', label:'Bienvenidas', def:'El mensaje automático de bienvenida (ManyChat) que abrió la conversación.\n\nCÓMO SE MIDE: SOLO Instagram. El primer mensaje de la conversación es saliente pero AUTOMÁTICO (no lo escribiste vos: la API lo marca como enviado por una automatización), y salió ese día.\n\nNo cuenta como Outbound: Outbound son solo los que abriste vos a mano.'},
     {k:'cta', label:'CTA', def:'Respuestas a un call-to-action de feed o historias.\n\nSE CARGA A MANO: HighLevel no la puede detectar sola. Requiere instrumentar ManyChat para que etiquete al contacto cuando llega por un CTA.'},
-    {k:'respuestas', label:'Respuestas', def:'Te contestó alguien con quien YA venías hablando.\n\nCÓMO SE MIDE: el contacto NO es nuevo (fue dado de alta otro día) y mandó al menos un mensaje entrante ese día. Se cuenta 1 por contacto, no por mensaje.\n\nTikTok va aparte, en Respuestas TikTok.'},
+    {k:'respuestas', label:'Respuestas', def:'Te contestó alguien con quien YA venías hablando.\n\nCÓMO SE MIDE: el contacto NO es nuevo (fue dado de alta otro día) y mandó al menos un mensaje entrante ese día. Se cuenta 1 por conversación, no por mensaje (si la misma persona tiene dos conversaciones, suma 2).\n\nTikTok va aparte, en Respuestas TikTok.'},
     {k:'seg_ig', label:'Seguimientos IG', def:'Le escribiste a alguien en una conversación que ya venía de antes, por Instagram.\n\nCÓMO SE MIDE: la conversación NO empezó ese día, y vos mandaste al menos un mensaje humano (no ManyChat) ese día. Se cuenta 1 por conversación.'},
     {k:'seg_wpp', label:'Seguimientos Wpp', def:'Le escribiste a alguien en una conversación que ya venía de antes, por WhatsApp.\n\nCÓMO SE MIDE: la conversación NO empezó ese día, y vos mandaste al menos un mensaje humano (no ManyChat) ese día. Se cuenta 1 por conversación.'},
     {k:'outbound_tk', label:'Outbound TikTok', def:'Vos abriste la conversación con alguien nuevo, por TikTok.\n\nCÓMO SE MIDE: igual que Outbound (contacto nuevo del día + primer mensaje tuyo y humano), pero en el DM nativo de TikTok.\n\nOJO: el WhatsApp que viene de TikTok NO es esto — eso es Inbound Wpp·TikTok.'},
@@ -1180,6 +1180,9 @@ window.bfApply=async(overwrite)=>{
   const trae=window._bfData||{};
   for(const ds in trae){ const key=state.tblMember+'|'+ds; if(!DB.entries[key]) DB.entries[key]={};
     for(const k in trae[ds]){ const v=trae[ds][k]; if(!v) continue; const cur=+DB.entries[key][k]||0; if(overwrite||cur===0) DB.entries[key][k]=v; } }
+  // El backfill acaba de persistir el desglose de contactos en st_shadow_metrics:
+  // invalidar el índice para que renderTable lo vuelva a traer y aparezcan los puntos.
+  TBL_CONTACTS_KEY=null;
   bfClose(); await save(); toast('Datos de HighLevel aplicados'); renderTable();
 };
 window.setTblMember=(id)=>{ state.tblMember=id; renderTable(); };
