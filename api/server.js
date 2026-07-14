@@ -2126,7 +2126,9 @@ async function provisionOrgAdmin({ orgId, name, email, password }, logTag) {
     profRes = await fetch(SUPABASE_URL + '/rest/v1/st_profiles', {
       method: 'POST',
       headers: svcHeaders({ 'Prefer': 'return=minimal' }),
-      body: JSON.stringify({ id: uid, org_id: orgId, name, role: 'admin', commission: 0 }),
+      // user_id es NOT NULL desde la 013 (sin default ni trigger) — si falta,
+      // el INSERT viola la restricción y el alta de admin falla siempre.
+      body: JSON.stringify({ id: uid, user_id: uid, org_id: orgId, name, role: 'admin', commission: 0 }),
     });
   } catch {
     profRes = { status: 500 };
@@ -2402,7 +2404,7 @@ async function patchOrgMember(req, res, sa, orgId, uid) {
   let profRows;
   try {
     const r = await fetch(
-      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,active',
+      SUPABASE_URL + '/rest/v1/st_profiles?org_id=eq.' + encodeURIComponent(orgId) + '&select=id,role,active,user_id',
       { headers: svcHeaders() }
     );
     if (r.status !== 200) return sendJSON(res, 500, { error: 'No se pudieron leer los miembros' });
@@ -2447,15 +2449,22 @@ async function patchOrgMember(req, res, sa, orgId, uid) {
     return sendJSON(res, 502, { error: 'No se pudo actualizar al miembro' });
   }
 
-  // Ban/unban best-effort: el active=false ya bloquea vía checkUserToken.
-  if (hasActive) {
+  // Sin ban: el active=false ya bloquea el acceso vía RLS (st_my_profile()
+  // filtra `active is not false`) — banear afectaría el auth COMPARTIDO entre
+  // orgs y apps (tracker, CallIQ...) por una baja de una sola org (mismo
+  // criterio que bajaPerfil()/deleteMember(), fe14fc3). Se conserva SOLO el
+  // unban al reactivar, como red de rescate para gente baneada por versiones
+  // viejas del código (mismo patrón que importGhlUser). `uid` acá es el id de
+  // MEMBRESÍA (st_profiles.id), no el auth uid — usar target.user_id (con
+  // fallback a target.id para perfiles viejos donde coinciden, patrón 013).
+  if (hasActive && body.active) {
     try {
-      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(uid), {
+      await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(target.user_id || target.id), {
         method: 'PUT',
         headers: svcHeaders(),
-        body: JSON.stringify({ ban_duration: body.active ? 'none' : '87600h' }),
+        body: JSON.stringify({ ban_duration: 'none' }),
       });
-    } catch { /* best-effort: el soft-delete ya impide el acceso */ }
+    } catch { /* best-effort unban de rescate */ }
   }
 
   console.log(`[api] PATCH /api/orgs/${orgId}/members super=${sa.email} uid=${uid} role=${hasRole ? body.role : '-'} active=${hasActive ? body.active : '-'} -> 200`);
