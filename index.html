@@ -620,6 +620,45 @@ function num(n){ return (+n||0).toLocaleString('es'); }
 const VIEW = document.getElementById('view');
 let state = { view:'dashboard', ptype:'week', ref: todayStr(), capMember:null, capDate:null };
 function go(view){ state.view=view; render(); }
+
+// ---------- Persistencia de la navegación ----------
+// Un refresh tiene que devolverte EXACTAMENTE donde estabas: misma vista, mismo
+// miembro, mismo período. Se guarda por usuario (el GoTrue es compartido entre
+// apps) y se ata a la org: si volvés a otra org (p. ej. el super sale del modo
+// visita, que es efímero), el estado guardado no aplica y se descarta.
+const NAV_VIEWS=['dashboard','capture','table','team','goals','sales','caja','platform'];
+function navKey(){ return (ME&&ME.id) ? 'st_nav_'+ME.id : null; }
+function saveNav(){
+  const k=navKey(); if(!k||!ME) return;
+  try{
+    localStorage.setItem(k, JSON.stringify({
+      org_id:ME.org_id, view:state.view, ptype:state.ptype, ref:state.ref,
+      capMember:state.capMember, capDate:state.capDate,
+      tblMember:state.tblMember, tblRef:state.tblRef,
+    }));
+  }catch(e){ /* modo privado / storage lleno: la navegación no se guarda, no rompe nada */ }
+}
+// Restaura la navegación guardada. Valida TODO antes de aplicar: una vista que ya
+// no te corresponde por rol, o un miembro que ya no está en el equipo, te dejarían
+// en una pantalla rota. Ante cualquier duda, se queda con el default.
+function restoreNav(){
+  const k=navKey(); if(!k||!ME) return;
+  let s; try{ s=JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return; }
+  if(!s || s.org_id!==ME.org_id) return; // otra org: el estado guardado no aplica
+  if(NAV_VIEWS.includes(s.view)){
+    const soloAdmin=['team','goals','platform'].includes(s.view);
+    const esPlat=s.view==='platform';
+    if((!soloAdmin || IS_ADMIN) && (!esPlat || IS_SUPER)) state.view=s.view;
+  }
+  if(s.ptype) state.ptype=s.ptype;
+  if(s.ref) state.ref=s.ref;
+  if(s.capDate) state.capDate=s.capDate;
+  if(s.tblRef) state.tblRef=s.tblRef;
+  // El miembro guardado solo vale si sigue en el equipo y lo podés ver.
+  const visible=(id)=> id && (IS_ADMIN ? DB.members.some(m=>m.id===id) : id===ME.id);
+  if(visible(s.capMember)) state.capMember=s.capMember;
+  if(visible(s.tblMember)) state.tblMember=s.tblMember;
+}
 document.querySelectorAll('.nav-i').forEach(el=>{
   el.tabIndex=0; el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); el.click(); } });
   el.addEventListener('click',()=>{
@@ -641,6 +680,7 @@ function render(){
   else if(state.view==='sales') renderSales();
   else if(state.view==='caja') renderCaja();
   else if(state.view==='platform') renderPlatform();
+  saveNav();
   window.scrollTo(0,0);
 }
 
@@ -963,8 +1003,8 @@ function captureSummary(member,key){
   if(member.role==='triage'){ return `asistencia <b>${fmtPct(cur.asistencias,cur.agendadas)}</b>`; }
   return `cierre <b>${fmtPct(cur.cierres,cur.ofertas)}</b>`;
 }
-window.setCapMember=(id)=>{ state.capMember=id; state.ghlFill=null; renderCapture(); };
-window.setCapDate=(d)=>{ state.capDate=d||todayStr(); state.ghlFill=null; renderCapture(); };
+window.setCapMember=(id)=>{ state.capMember=id; state.ghlFill=null; renderCapture(); saveNav(); };
+window.setCapDate=(d)=>{ state.capDate=d||todayStr(); state.ghlFill=null; renderCapture(); saveNav(); };
 // Badge "GHL/Ventas" desaparece apenas el usuario toca el valor a mano.
 function clearGhlBadge(k){ if(state.ghlFill&&state.ghlFill[k]){ delete state.ghlFill[k]; const b=document.getElementById('gb_'+k); if(b) b.remove(); } }
 // Trae lo certero del día (endpoint /api/capture/ghl) y lo aplica al contador.
@@ -1185,8 +1225,8 @@ window.bfApply=async(overwrite)=>{
   TBL_CONTACTS_KEY=null;
   bfClose(); await save(); toast('Datos de HighLevel aplicados'); renderTable();
 };
-window.setTblMember=(id)=>{ state.tblMember=id; renderTable(); };
-window.tblNav=(dir)=>{ const r=parseD(state.tblRef); r.setMonth(r.getMonth()+dir); state.tblRef=dstr(r); renderTable(); };
+window.setTblMember=(id)=>{ state.tblMember=id; renderTable(); saveNav(); };
+window.tblNav=(dir)=>{ const r=parseD(state.tblRef); r.setMonth(r.getMonth()+dir); state.tblRef=dstr(r); renderTable(); saveNav(); };
 window.tblEdit=(el)=>{
   const key=state.tblMember+'|'+el.dataset.d;
   if(!DB.entries[key]) DB.entries[key]={};
@@ -2970,6 +3010,10 @@ async function boot(){
       const nav=document.getElementById('nav-platform'); if(nav) nav.style.display='';
       // Super-admin = permisos totales en cualquier equipo (la RLS lo respalda vía st_is_super()).
       if(!IS_ADMIN){ IS_ADMIN=true; render(); }
+      // Este fetch resuelve DESPUÉS del render inicial, así que restoreNav() corrió sin
+      // saber que sos super: las vistas que dependen de eso (Plataforma, y las de admin
+      // si tu perfil no es admin) quedaron descartadas. Ahora que se sabe, se reintenta.
+      const antes=state.view; restoreNav(); if(state.view!==antes) render();
     })
     .catch(()=>{ /* fail-closed: el ítem queda oculto */ });
   // Retorno del flujo OAuth de GHL (query params que deja el callback de la mini-API).
@@ -2988,6 +3032,7 @@ async function boot(){
   await loadFromSupabase();
   state.capMember = IS_ADMIN ? (DB.members[0]&&DB.members[0].id) : ME.id;
   state.tblMember = state.capMember;
+  restoreNav(); // un refresh te devuelve donde estabas (pisa los defaults de arriba si el estado guardado sigue siendo válido)
   document.getElementById('loginOv') && (document.getElementById('loginOv').style.display='none');
   document.querySelector('.app').style.display='';
   render();
