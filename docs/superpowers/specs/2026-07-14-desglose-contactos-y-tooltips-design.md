@@ -30,6 +30,31 @@ columna `contacts` (jsonb, migración 017) está poblada. Su clave única es
 
 ## Arquitectura
 
+### 0. Backend — unificar el camino del closer con el motor
+
+`captureGhl` tiene hoy **dos implementaciones distintas**:
+- **setter / triage** → llama a `computeMemberKpis` (el motor del modo sombra), que devuelve
+  `{values, contacts}`.
+- **closer** → trae los eventos del calendario **por su cuenta**, con una copia de la lógica de
+  citas. No genera contactos, y calcula menos métricas que el motor (le faltan `segundas`,
+  `cancelados`, `reservas`, `revenue`, `cash_cuotas`).
+
+Son dos implementaciones de la misma regla, que pueden divergir.
+
+**Decisión (Alejandro, 2026-07-14): unificar.** El closer pasa a usar `computeMemberKpis` como
+el resto. Consecuencias:
+- Gana el desglose de contactos (el motor hace `bump(kpi, contactId)` en `kpisCitas`).
+- El ⚡ Autocompletar del closer empieza a traer también `segundas`, `cancelados`, `reservas`,
+  `revenue` y `cash_cuotas`, que hoy se cargan a mano.
+- Se elimina la lógica duplicada.
+
+**Riesgo a controlar:** toca un camino que hoy funciona bien. La verificación tiene que
+confirmar que `llamadas`, `asistencias` y `no_shows` devuelven **exactamente los mismos
+números** que antes para un mismo día y closer. Si cambian, se investiga antes de seguir.
+
+Para eso, `computeMemberKpis` necesita `salesRows` y `cuotasRows` (hoy `captureGhl` se los pasa
+vacíos al setter). Hay que leerlos de `st_sales` / `st_cuotas` como ya hace el bloque de cierres.
+
 ### 1. Backend — persistir lo que ya se calcula
 
 `captureGhl` pasa a:
