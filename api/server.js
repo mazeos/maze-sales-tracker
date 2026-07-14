@@ -592,24 +592,14 @@ async function ghlLeads(req, res, member, url) {
 
 // ---------- GET /api/capture/ghl ----------
 // Autocompletar Cargar día. Un solo motor (computeMemberKpis, el mismo del modo
-// sombra) para todos los roles con ghl_user_id vinculado: closer (llamadas/
+// sombra) para TODOS los roles, tengan o no ghl_user_id vinculado: closer (llamadas/
 // asistencias/no_shows por calendario + cierres/cash/reservas/revenue/cash_cuotas
-// desde st_sales/st_cuotas del tracker) y setter/triage (conversaciones). El día
-// se corta en la TZ de la org. Además de devolver los valores, esta ruta persiste
-// el cálculo (con el desglose de contactos) en st_shadow_metrics — la UI igual
-// aplica los valores y el usuario guarda por el flujo normal (la RLS de
+// desde st_sales/st_cuotas del tracker) y setter/triage (conversaciones). Sin
+// vínculo GHL, el motor devuelve solo los KPIs internos (ver comentario más abajo).
+// El día se corta en la TZ de la org. Además de devolver los valores, esta ruta
+// persiste el cálculo (con el desglose de contactos) en st_shadow_metrics — la UI
+// igual aplica los valores y el usuario guarda por el flujo normal (la RLS de
 // st_entries manda).
-function tzDayRange(dateStr, tz) {
-  const utcMidnight = new Date(dateStr + 'T00:00:00Z').getTime();
-  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const p = Object.fromEntries(fmt.formatToParts(new Date(utcMidnight)).map((x) => [x.type, x.value]));
-  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
-  const offset = asUtc - utcMidnight; // cuánto adelanta el tz respecto de UTC
-  const start = utcMidnight - offset;
-  return { start, end: start + 86400000 };
-}
-
 // KPIs que computeMemberKpis (metrics.js) calcula desde salesRows/cuotasRows del
 // propio tracker, no desde la API de GHL. Ver metrics.js bloque "Ventas y cuotas".
 const VENTAS_KPI_KEYS = new Set(['cierres', 'cash_nuevo', 'reservas', 'revenue', 'cash_cuotas']);
