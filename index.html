@@ -265,6 +265,11 @@
   .grid tr.drow td{background:rgba(255,255,255,.02);font-family:'JetBrains Mono';color:var(--muted);padding:7px 6px}
   .grid tr.drow .stickyc{color:var(--ink);background:#171720}
   .grid tr.drow td.tot{background:#171720}
+  /* filas de resumen fijadas al pie (bottom lo pone pinFooterRows por JS); opacas para
+     que las filas de arriba no se transparenten a través al scrollear */
+  .grid tfoot td{position:sticky;z-index:5;background:var(--surface-2)}
+  .grid tfoot .stickyc{z-index:7;background:#171720}
+  .grid tfoot td.tot{z-index:7;background:#171720}
   .grid .lbl{cursor:help}
   .grid .lbl:hover{color:var(--lime-ink)}
   .cell-td{position:relative}
@@ -287,6 +292,9 @@
   body[data-theme="light"] .grid tr.drow .stickyc,
   body[data-theme="light"] .grid tr.drow td.tot{background:#edefe4}
   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
+  body[data-theme="light"] .grid tfoot td{background:var(--surface-2)}
+  body[data-theme="light"] .grid tfoot .stickyc,
+  body[data-theme="light"] .grid tfoot td.tot{background:#edefe4}
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
   /* contraste de roles/tags en claro */
   body[data-theme="light"] .pill.setter,
@@ -1121,8 +1129,9 @@ function renderTable(){
         cells+=`<td class="${isT?'today':''} cell-td"><input class="cell" type="number" min="0" value="${v||''}" data-k="${mt.k}" data-d="${ds}" onchange="tblEdit(this)" ${canEdit?'':'readonly'}>${dot}${panel}</td>`; });
       rows+=`<tr><td class="stickyc lbl" data-tip="${esc(mt.def)}">${mt.label}</td>${cells}<td class="tot">${mt.money?money(tot):tot}</td></tr>`;
     });
-    // filas derivadas (tasas, read-only)
-    rows+=derivedRows(member.role, dayList);
+    // filas derivadas (tasas/subtotales, read-only) — van en el tfoot para quedar
+    // fijadas al pie cuando se scrollea verticalmente.
+    const drows=derivedRows(member.role, dayList);
     const memberOpts=DB.members.map(m=>`<option value="${m.id}" ${state.tblMember===m.id?'selected':''}>${esc(m.name)} · ${ROLE_LABEL[m.role]}</option>`).join('');
     body=`<div class="cap-controls">
       <select class="chip" onchange="setTblMember(this.value)" data-tip="De quién ves el mes.">${memberOpts}</select>
@@ -1132,9 +1141,21 @@ function renderTable(){
       <span class="badge" data-tip="Igual que en Google Sheets: hacé clic en una celda y escribí. Se guarda solo.">✎ Editá cualquier celda</span>
       ${canEdit?`<button class="chip" onclick="backfillTable()" data-tip="Trae la data de HighLevel de todo el mes visible (día por día) y llena las celdas. Muestra una vista previa antes de escribir.">⚡ Traer de HighLevel</button>`:''}
     </div>
-    <div class="sheet"><table class="grid"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+    <div class="sheet"><table class="grid"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${drows}</tfoot></table></div>`;
   }
   VIEW.innerHTML = topbar('') + `<div class="eyebrow">Vista tabla</div><h2 class="view">Día por día ${info('El mismo formato del Google Sheet original: cada columna es un día del mes, cada fila una métrica. Las filas grises son tasas calculadas (no se editan).')}</h2>` + body + footer();
+  pinFooterRows();
+}
+// Fija las filas del tfoot al pie: cada fila se pega a `bottom` con el alto acumulado
+// de las que tiene debajo. Se mide el alto real (no un valor hardcodeado) para que
+// no se solapen ni queden huecos si cambia la fuente o el zoom.
+function pinFooterRows(){
+  const trs=VIEW.querySelectorAll('.grid tfoot tr');
+  let acc=0;
+  for(let i=trs.length-1;i>=0;i--){
+    trs[i].querySelectorAll('td').forEach(td=>{ td.style.bottom=acc+'px'; });
+    acc+=trs[i].offsetHeight;
+  }
 }
 function derivedRows(role, dayList){
   const get=(ds,k)=>{ const key=state.tblMember+'|'+ds; return (DB.entries[key]&&+DB.entries[key][k])||0; };
