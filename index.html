@@ -1187,6 +1187,19 @@ function derivedRows(role, dayList){
     const totCell=d.pct?fmtPct(ta,tb):(d.money?money(tot):tot);
     out+=`<tr class="drow"><td class="stickyc lbl" data-tip="${esc(d.def)}">${d.label}</td>${cells}<td class="tot">${totCell}</td></tr>`;
   });
+  // Contactos únicos: distintos contactId tocados, uniendo TODAS las métricas del día
+  // (un contacto que aparece en outbound Y en un link cuenta 1). El total del mes es la
+  // unión del mes entero, no la suma de los diarios. Sale de TBL_CONTACTS, así que solo
+  // hay dato en los días traídos de HighLevel. No aplica a triage (sin contactos GHL).
+  if(role!=='triage'){
+    const uDef='Cuántos contactos DISTINTOS tocaste ese día, contando cada uno una sola vez aunque aparezca en varias métricas.\n\nEl total del mes son los contactos distintos del mes entero: si tocaste a la misma persona dos días, cuenta 1.\n\nOJO: "distinto" = contacto de HighLevel. Si la misma persona te habló por IG y por WhatsApp con dos contactos separados, cuenta 2 hasta que los unas en HighLevel.\n\nSolo cuenta los días que trajiste de HighLevel.';
+    const monthSet=new Set(); let uCells='';
+    dayList.forEach(ds=>{ const isT=ds===T; const daySet=new Set();
+      for(const k in TBL_CONTACTS){ if(k.endsWith('|'+ds)) TBL_CONTACTS[k].forEach(c=>{ if(c&&c.id){ daySet.add(c.id); monthSet.add(c.id); } }); }
+      uCells+=`<td class="${isT?'today':''}">${daySet.size||'·'}</td>`;
+    });
+    out=`<tr class="drow"><td class="stickyc lbl" data-tip="${esc(uDef)}">Contactos únicos</td>${uCells}<td class="tot">${monthSet.size||'·'}</td></tr>`+out;
+  }
   return out;
 }
 // Panel de contactos de una celda. Mismo patrón que el recap del panel de calibración.
