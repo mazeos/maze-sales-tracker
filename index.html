@@ -265,11 +265,14 @@
   .grid tr.drow td{background:rgba(255,255,255,.02);font-family:'JetBrains Mono';color:var(--muted);padding:7px 6px}
   .grid tr.drow .stickyc{color:var(--ink);background:#171720}
   .grid tr.drow td.tot{background:#171720}
-  /* filas de resumen fijadas al pie (bottom lo pone pinFooterRows por JS); opacas para
-     que las filas de arriba no se transparenten a través al scrollear */
-  .grid tfoot td{position:sticky;z-index:5;background:var(--surface-2)}
-  .grid tfoot .stickyc{z-index:7;background:#171720}
-  .grid tfoot td.tot{z-index:7;background:#171720}
+  /* filas de resumen fijadas al pie (bottom lo pone pinFooterRows por JS). El fondo va
+     SÓLIDO y con especificidad alta (.grid tfoot tr.drow td) para ganarle a la regla
+     .grid tr.drow td, que es semitransparente y dejaba pasar las filas de atrás. */
+  .grid tfoot td{position:sticky;z-index:5}
+  .grid tfoot tr.drow td{background:#171720}
+  .grid tfoot tr.drow .stickyc{z-index:7;background:#171720}
+  .grid tfoot tr.drow td.tot{z-index:7;background:#171720}
+  .grid tfoot tr.drow td.today{background:#171720}
   .grid .lbl{cursor:help}
   .grid .lbl:hover{color:var(--lime-ink)}
   .cell-td{position:relative}
@@ -292,9 +295,10 @@
   body[data-theme="light"] .grid tr.drow .stickyc,
   body[data-theme="light"] .grid tr.drow td.tot{background:#edefe4}
   body[data-theme="light"] .grid tr.drow td{background:rgba(0,0,0,.025)}
-  body[data-theme="light"] .grid tfoot td{background:var(--surface-2)}
-  body[data-theme="light"] .grid tfoot .stickyc,
-  body[data-theme="light"] .grid tfoot td.tot{background:#edefe4}
+  body[data-theme="light"] .grid tfoot tr.drow td,
+  body[data-theme="light"] .grid tfoot tr.drow td.today,
+  body[data-theme="light"] .grid tfoot tr.drow .stickyc,
+  body[data-theme="light"] .grid tfoot tr.drow td.tot{background:#edefe4}
   body[data-theme="light"] .brand{background:radial-gradient(circle at 30% 25%, #eef3df, #f6f6f0);border-color:#dfe6c8}
   /* contraste de roles/tags en claro */
   body[data-theme="light"] .pill.setter,
